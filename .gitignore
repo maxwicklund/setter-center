@@ -1,0 +1,22 @@
+# Spreadsheet IDs and the roster. Paste into Apps Script; never commit.
+apps-script/Config.gs
+
+# The build prompt (spreadsheet IDs, owners' emails) stays in the chat.
+*BUILD*PROMPT*
+*build*prompt*
+
+# Never commit anything captured from the live endpoint or the live page.
+*.har
+*.live.json
+sample.json
+fixtures/live*
+screenshots/
+*.png
+*.jpg
+*.jpeg
+
+.DS_Store
+node_modules/
+
+# Local tool settings and dev-server config.
+.claude/
