@@ -91,6 +91,15 @@ export function ctClock(iso) {
 
 export const fmtInt = n => (n == null ? '—' : Math.round(n).toLocaleString('en-US'));
 
+/** Contacts (the dialer feed's Calls Over 60s) ride on dial rows only when the feed has that column. */
+export const hasContacts = p => Boolean(p.health && p.health.contacts_col);
+
+/** A share as '3.4%', one decimal: contact rates sit in single digits, where a whole percent is too coarse. */
+export const fmtPct1 = v => (v == null ? '—' : `${(100 * v).toFixed(1)}%`);
+
+/** Contacts ÷ dials, or '—' with no dials. */
+export const contactRate = (contacts, dials) => (dials ? fmtPct1(contacts / dials) : '—');
+
 /** Talk seconds -> '8m' / '4h 49m', formatted once, after summing. */
 export function fmtDuration(seconds) {
   if (seconds == null) return '—';

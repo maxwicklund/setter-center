@@ -1,5 +1,5 @@
 import { h, s } from '../dom.js';
-import { DEPARTED_KEY, WINDOWS, fmtInt, fmtDuration, dayLabel, addDays, dateRange, monthBounds, monthElapsed, resolveWindow } from '../data.js';
+import { DEPARTED_KEY, WINDOWS, fmtInt, fmtDuration, dayLabel, addDays, dateRange, monthBounds, monthElapsed, resolveWindow, hasContacts, contactRate, fmtPct1 } from '../data.js';
 import { tag, segmented, customRange, defLink } from '../ui.js';
 
 // Tab 4, Setter Deep Dive: one person, one page, read like a player card. Compared only
@@ -61,15 +61,16 @@ function playerHead(p, ix, me, win, prior) {
     h('p', { class: 'sub faint' }, `${dayLabel(win.from)} – ${dayLabel(win.to)} (${win.days} days), compared with the ${win.days} days before: ${dayLabel(prior.from)} – ${dayLabel(prior.to)}`));
 }
 
-// ---------------------------------------------------------------- activity (two tiles, not funnel bars)
+// ---------------------------------------------------------------- activity (tiles, not funnel bars)
 
 function dialStats(p, who, from, to) {
   const rows = p.dials.filter(r => r.setter === who && r.date >= from && r.date <= to);
   const dials = rows.reduce((t, r) => t + r.dials, 0);
   const talk = rows.reduce((t, r) => t + r.talk_seconds, 0);
+  const contacts = rows.reduce((t, r) => t + (r.contacts || 0), 0);
   const active = rows.filter(r => r.dials > 0).length;
   const best = rows.reduce((b, r) => (r.dials > (b ? b.dials : 0) ? r : b), null);
-  return { rows: rows.length, dials, talk, active, best };
+  return { rows: rows.length, dials, talk, contacts, active, best };
 }
 
 const bookedIn = (p, who, from, to) => p.booked.filter(r => r.setter === who && r.date_booked >= from && r.date_booked <= to).reduce((t, r) => t + r.booked, 0);
@@ -88,9 +89,16 @@ function activity(p, me, win, prior, team) {
   const perDay = now.active ? now.dials / now.active : null;
   const teamPerDay = median(team.map(t => dialStats(p, t, win.from, win.to)).filter(st => st.active).map(st => st.dials / st.active));
   const teamSpd = median(team.map(t => dialStats(p, t, win.from, win.to)).filter(st => st.dials).map(st => st.talk / st.dials));
+  const teamRate = median(team.map(t => dialStats(p, t, win.from, win.to)).filter(st => st.dials).map(st => st.contacts / st.dials));
+  const contactsTile = hasContacts(p) ? h('div', { class: 'mini-tile' },
+    h('p', { class: 'label' }, defLink('contacts-60', 'Contacts')),
+    h('p', { class: 'tile-value' }, fmtInt(now.contacts)),
+    delta(now.contacts, before.rows ? before.contacts : null, 'previous period'),
+    h('p', { class: 'sub' }, `${contactRate(now.contacts, now.dials)} of dials · ${now.active ? fmtInt(now.contacts / now.active) : '—'} per active day`),
+    h('p', { class: 'sub faint' }, `Team median ${teamRate == null ? '—' : fmtPct1(teamRate)} of dials`)) : null;
   return h('section', { class: 'card activity' },
     h('h2', null, 'Activity'),
-    h('div', { class: 'tile-pair' },
+    h('div', { class: contactsTile ? 'tile-trio' : 'tile-pair' },
       h('div', { class: 'mini-tile' },
         h('p', { class: 'label' }, 'Dials'),
         h('p', { class: 'tile-value' }, fmtInt(now.dials)),
@@ -98,6 +106,7 @@ function activity(p, me, win, prior, team) {
         h('p', { class: 'sub' }, `${fmtInt(now.active)} active days · ${perDay == null ? '—' : fmtInt(perDay)} per active day`),
         h('p', { class: 'sub faint' }, `Team median ${teamPerDay == null ? '—' : fmtInt(teamPerDay)} per active day`),
         now.best && now.best.dials ? h('p', { class: 'sub' }, `Best day: ${fmtInt(now.best.dials)} on ${dayLabel(now.best.date)}`) : null),
+      contactsTile,
       h('div', { class: 'mini-tile' },
         h('p', { class: 'label' }, 'Talk time'),
         h('p', { class: 'tile-value' }, fmtDuration(now.talk)),
@@ -278,7 +287,7 @@ function eodCard(p, me, win) {
       h('span', { class: 'legend-item' }, h('span', { class: 'eod-day is-missing' }), 'dialed, no EOD'),
       h('span', { class: 'legend-item' }, h('span', { class: 'eod-day is-off' }), 'no dials')),
     h('p', { class: 'sub' }, `${fmtInt(contacts)} contacts self-reported on those EODs`),
-    h('p', { class: 'sub faint' }, "By Report Date. Contacts are the setter's own count, not a dialer figure."));
+    h('p', { class: 'sub faint' }, "By Report Date. These are the setter's own count; the dialer's contacts (calls over 60s) are under Activity."));
 }
 
 // ---------------------------------------------------------------- routing-queue speed

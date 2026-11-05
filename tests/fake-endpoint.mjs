@@ -127,11 +127,11 @@ export const post = (ctx, body) => JSON.parse(ctx.doPost({ postData: { contents:
 export const S = 'SENTINEL'; // planted in every column the code must never read
 
 function fakeKpi() {
-  const dials = [['Date', 'Setter', 'Dials', 'Answered', 'Talk Seconds', 'Talk Time', '', `${S} banner`]];
+  const dials = [['Date', 'Setter', 'Dials', 'Answered', 'Talk Seconds', 'Talk Time', 'Calls Over 60s', `${S} banner`]];
   const people = ['Ava Testwell', 'Ben Sampleton', 'Cal Dummond', 'Xena Formerly', 'Quinn Unknown', 'Eli R'];
   ['2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02'].forEach((d, i) => people.forEach((p, j) => {
     const n = (i + 1) * 10 + j;
-    dials.push([d, p, String(n), `${S}-7777`, String(n * 30), `${S}-tt`]);
+    dials.push([d, p, String(n), `${S}-7777`, String(n * 30), `${S}-tt`, String(Math.floor(n / 5))]);
   }));
   const eodHead = ['Timestamp', 'Submission ID', 'Report Date', 'Setter', 'Contacts', 'Not Qualified', 'Reported Booked',
     'Appointments Added', 'Status Updates', 'Qualified No Book', 'Notes', 'Booking Difference', 'Processing Status', 'Closed Deals'];

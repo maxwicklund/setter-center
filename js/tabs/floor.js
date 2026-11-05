@@ -1,5 +1,5 @@
 import { h } from '../dom.js';
-import { DEPARTED_KEY, fmtInt, fmtDuration, bySetter, dayLabel } from '../data.js';
+import { DEPARTED_KEY, fmtInt, fmtDuration, bySetter, dayLabel, hasContacts, contactRate } from '../data.js';
 import { tag, defLink } from '../ui.js';
 import { DIAL_TARGET } from '../../config.js';
 
@@ -12,6 +12,7 @@ export function renderFloor(p, ix) {
   const today = p.today_ct;
   const dialsOk = p.sources.kpi.ok;
   const apptsOk = p.sources.tracker.ok;
+  const contactsOk = dialsOk && hasContacts(p);
 
   const dialRows = new Map(p.dials.filter(r => r.date === today).map(r => [r.setter, r]));
   const dialerReported = dialRows.size > 0;
@@ -23,6 +24,7 @@ export function renderFloor(p, ix) {
   const rosterDials = total(dialRows, k => ix.isTeam(k));
   const offRosterDials = total(dialRows, k => ix.status(k) === 'unresolved');
   const talk = [...dialRows.values()].reduce((t, r) => t + r.talk_seconds, 0);
+  const contacts = [...dialRows.values()].reduce((t, r) => t + (r.contacts || 0), 0);
   const dialing = [...dialRows.values()].filter(r => r.dials > 0 && r.setter !== DEPARTED_KEY).length;
   const bookedTotal = total(booked);
   const qualifiedShows = p.outcomes.filter(r => r.appt_date === today).reduce((t, r) => t + r.qualified_show, 0);
@@ -31,7 +33,7 @@ export function renderFloor(p, ix) {
   // Departed people only get a (collapsed) row on a day they actually did something.
   const rows = [...dialRows.values()]
     .filter(r => r.setter !== DEPARTED_KEY || r.dials > 0 || booked.get(DEPARTED_KEY))
-    .map(r => ({ setter: r.setter, dials: r.dials, talk: r.talk_seconds, booked: booked.get(r.setter) || 0, eod: eodSent.has(r.setter) }))
+    .map(r => ({ setter: r.setter, dials: r.dials, contacts: r.contacts, talk: r.talk_seconds, booked: booked.get(r.setter) || 0, eod: eodSent.has(r.setter) }))
     .sort((a, b) => b.dials - a.dials || ix.label(a.setter).localeCompare(ix.label(b.setter)));
   const scaleMax = Math.max(hasTarget ? DIAL_TARGET * 1.25 : 0, ...rows.map(r => r.dials), 1);
 
@@ -45,11 +47,13 @@ export function renderFloor(p, ix) {
       hasTarget && dialsOk && dialerReported ? pace(p, ix, dialRows) : null),
     h('div', { class: 'tiles' },
       tile(defLink('active-day', 'Setters dialing today'), dialsOk && dialerReported ? fmtInt(dialing) : '—', `with dials > 0, of ${fmtInt([...dialRows.keys()].filter(k => k !== DEPARTED_KEY).length)} on the dialer`, dialsOk),
+      tile(defLink('contacts-60', 'Contacts today'), contactsOk && dialerReported ? fmtInt(contacts) : '—',
+        `calls over 60s · ${contactRate(contacts, teamDials)} of dials`, contactsOk, dialsOk ? 'not in the dialer feed' : 'source unavailable'),
       tile(defLink('talk', 'Talk time today'), dialsOk && dialerReported ? fmtDuration(talk) : '—', 'dialer date', dialsOk),
       tile(defLink('booked', 'Appointments entered today'), apptsOk ? fmtInt(bookedTotal) : '—', 'by Date Booked · entered so far', apptsOk),
       tile(defLink('qualified-show', 'Qualified shows today'), apptsOk ? fmtInt(qualifiedShows) : '—', 'by Appointment Date · Showed + Qualified', apptsOk),
       tile(defLink('pending', "Pending on today's calendar"), apptsOk ? fmtInt(pendingToday) : '—', 'by Appointment Date · no outcome yet', apptsOk)),
-    setterTable(rows, ix, scaleMax, today, dialsOk, apptsOk, dialerReported, eodSent.size),
+    setterTable(rows, ix, scaleMax, today, dialsOk, apptsOk, contactsOk, dialerReported, eodSent.size),
     strip(noCoverage, offRoster, booked, dialRows, ix));
 }
 
@@ -89,25 +93,26 @@ function pace(p, ix, dialRows) {
       `Not in the target because the dialer has no rows for them: ${uncovered.map(r => r.setter).join(', ')}.`) : null);
 }
 
-function tile(label, value, sub, ok) {
+function tile(label, value, sub, ok, offNote = 'source unavailable') {
   return h('section', { class: 'tile card' + (ok ? '' : ' is-unavailable') },
     h('p', { class: 'label' }, label),
     h('p', { class: 'tile-value' }, value),
-    h('p', { class: 'sub' }, ok ? sub : 'source unavailable'));
+    h('p', { class: 'sub' }, ok ? sub : offNote));
 }
 
-function setterTable(rows, ix, scaleMax, today, dialsOk, apptsOk, reported, eodCount) {
+function setterTable(rows, ix, scaleMax, today, dialsOk, apptsOk, contactsOk, reported, eodCount) {
   if (!dialsOk || !reported) return null;
   const pct = v => `${Math.min(100, (100 * v) / scaleMax).toFixed(2)}%`;
   return h('section', { class: 'card floor-table-card', 'aria-labelledby': 'floor-table-title' },
     h('div', { class: 'card-head' },
       h('h2', { id: 'floor-table-title' }, 'By setter, today'),
-      h('p', { class: 'sub' }, `Dials and talk time by dialer date · appointments by Date Booked, entered so far · EOD by Report Date${hasTarget ? ` · dotted tick = ${DIAL_TARGET} dials` : ''}`)),
+      h('p', { class: 'sub' }, `Dials, contacts and talk time by dialer date · contacts = calls over 60s, with their share of dials · appointments by Date Booked, entered so far · EOD by Report Date${hasTarget ? ` · dotted tick = ${DIAL_TARGET} dials` : ''}`)),
     h('table', { class: 'floor-table' },
       h('thead', null, h('tr', null,
         h('th', { scope: 'col' }, 'Setter'),
         h('th', { scope: 'col', class: 'num' }, 'Dials'),
         h('th', { scope: 'col', class: 'bar-col' }, h('span', { class: 'sr-only' }, 'Dials bar')),
+        h('th', { scope: 'col', class: 'num' }, 'Contacts'),
         h('th', { scope: 'col', class: 'num' }, 'Talk'),
         h('th', { scope: 'col', class: 'num' }, 'Booked'),
         h('th', { scope: 'col' }, `EOD (${eodCount})`))),
@@ -117,10 +122,13 @@ function setterTable(rows, ix, scaleMax, today, dialsOk, apptsOk, reported, eodC
         fill.style.width = pct(r.dials);
         const tick = hasTarget ? h('div', { class: 'bar-tick' }) : null;
         if (tick) tick.style.left = pct(DIAL_TARGET);
-        return h('tr', { class: 'floor-row' + (status === 'unresolved' ? ' is-flagged' : ''), title: `${ix.label(r.setter)}: ${r.dials} dials today` },
+        const rate = contactRate(r.contacts, r.dials);
+        return h('tr', { class: 'floor-row' + (status === 'unresolved' ? ' is-flagged' : ''),
+          title: `${ix.label(r.setter)}: ${r.dials} dials today${contactsOk ? `, ${r.contacts} contacts (${rate})` : ''}` },
           h('th', { scope: 'row', class: 'who' }, ix.label(r.setter), tag(status)),
           h('td', { class: 'num dials' }, fmtInt(r.dials)),
           h('td', { class: 'bar-col' }, h('div', { class: 'bar', role: 'img', 'aria-label': `${r.dials} dials${hasTarget ? ` against ${DIAL_TARGET}` : ''}` }, fill, tick)),
+          h('td', { class: 'num contacts' }, contactsOk ? [fmtInt(r.contacts), r.dials ? [' ', h('span', { class: 'rate' }, rate)] : null] : '—'),
           h('td', { class: 'num talk' }, fmtDuration(r.talk)),
           h('td', { class: 'num booked' }, apptsOk ? fmtInt(r.booked) : '—'),
           h('td', { class: 'eod' }, r.eod ? h('span', { class: 'state state-good' }, '✓ Sent') : h('span', { class: 'state state-muted' }, 'Not yet')));

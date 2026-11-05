@@ -20,7 +20,7 @@
  * Nothing in this file writes to a sheet.
  */
 
-const VERSION = '2026-11-02.1';
+const VERSION = '2026-11-05.1';
 const CACHE_PREFIX = 'payload:' + VERSION + ':';
 const CACHE_TTL_S = 180;
 const CACHE_CHUNK_CHARS = 90000; // CacheService rejects a value over 100KB
@@ -30,7 +30,7 @@ const DEPARTED_KEY = '__departed__';
 // ranges and not the UI. Anything that survives this map is readable by anyone
 // holding the token. Header strings are byte-exact against the live sheets.
 const ALLOW = {
-  '_Dials':             ['Date', 'Setter', 'Dials', 'Talk Seconds'],
+  '_Dials':             ['Date', 'Setter', 'Dials', 'Talk Seconds', 'Calls Over 60s'],
   '_EOD':               ['Report Date', 'Setter', 'Contacts', 'Not Qualified', 'Reported Booked',
                          'Appointments Added', 'Status Updates', 'Qualified No Book',
                          'Booking Difference', 'Closed Deals'],
@@ -257,8 +257,9 @@ function buildPayload_() {
 
 function readKpi_(ss) {
   return {
-    // A-C and E. D (Answered) and F (Talk Time) are never read.
-    dials: readTab_(ss, '_Dials', 1, [[1, 3], [5, 1]], ['Date', 'Setter', 'Dials', 'Talk Seconds']),
+    // A-C, E and G. D (Answered) and F (Talk Time) are never read. G (Calls Over 60s) is
+    // not required: without it the dials still load and contacts are left off.
+    dials: readTab_(ss, '_Dials', 1, [[1, 3], [5, 1], [7, 1]], ['Date', 'Setter', 'Dials', 'Talk Seconds']),
     // C-J, L, N. K (Notes) is never read.
     eod: readTab_(ss, '_EOD', 1, [[3, 8], [12, 1], [14, 1]], ALLOW['_EOD']),
     a_appts: readTab_(ss, '_Appointments', 1, [[1, 1]], ['Date Booked'])
@@ -377,6 +378,7 @@ function aggregate_(raw, cfg, nowMs, sources) {
     status_inventory: [], tz_counts: [], future_with_outcome: 0,
     pay_vs_qshow: { pe_not_qs: 0, qs_not_pe: 0 },
     distinct_names: {}, nonpeople_in_ab: { dials: 0, appts: 0, eod: 0, goals: 0 },
+    contacts_col: null, contacts_over_dials: null,
     eod_test_row: null, eod_multi_submissions: 0,
     goals: null,
     all_rows_filtered: { daily: 0, first_touch: 0 }, median_collisions: 0,
@@ -445,6 +447,11 @@ function noteTable_(h, key, t) {
 function dialsPart_(t, names, h, out) {
   const acc = new Map();
   const rawNames = new Set();
+  // Contacts = the feed's Calls Over 60s. When the column is missing, rows carry no
+  // contacts field at all, so the page shows "not in the feed" rather than zeros.
+  const hasContacts = Object.prototype.hasOwnProperty.call(t.letters, 'Calls Over 60s');
+  h.contacts_col = hasContacts ? t.letters['Calls Over 60s'] : null;
+  h.contacts_over_dials = hasContacts ? 0 : null;
   for (const r of t.rows) {
     if (r.Setter) rawNames.add(normName_(r.Setter));
     const who = names.resolve(r.Setter, 'dials');
@@ -452,10 +459,17 @@ function dialsPart_(t, names, h, out) {
     if (who.kind !== 'person') { h.nonpeople_in_ab.dials++; continue; }
     if (!date) continue;
     const a = bucketOf_(acc, date + '|' + who.key, function () {
-      return { date: date, setter: who.key, dials: 0, talk_seconds: 0 };
+      const b = { date: date, setter: who.key, dials: 0, talk_seconds: 0 };
+      if (hasContacts) b.contacts = 0;
+      return b;
     });
     a.dials += int_(r.Dials);
     a.talk_seconds += int_(r['Talk Seconds']);
+    if (hasContacts) {
+      const c = int_(r['Calls Over 60s']);
+      a.contacts += c;
+      if (c > int_(r.Dials)) h.contacts_over_dials++;
+    }
   }
   out.dials = Array.from(acc.values());
   h.distinct_names.dials = rawNames.size;
@@ -781,8 +795,10 @@ function totalsPart_(out, names, h) {
   const onRoster = function (k) { const s = names.status(k); return s === 'live' || s === 'onboarding'; };
   const any = function () { return true; };
   const sum = function (arr, f, keep) { return arr.reduce(function (t, r) { return t + (keep(r.setter) ? r[f] : 0); }, 0); };
-  [['dials', out.dials, 'dials'], ['booked', out.booked, 'booked'], ['showed', out.outcomes, 'showed'],
-    ['qualified_show', out.outcomes, 'qualified_show'], ['pending', out.pending, 'pending']].forEach(function (m) {
+  const metrics = [['dials', out.dials, 'dials'], ['booked', out.booked, 'booked'], ['showed', out.outcomes, 'showed'],
+    ['qualified_show', out.outcomes, 'qualified_show'], ['pending', out.pending, 'pending']];
+  if (h.contacts_col) metrics.splice(1, 0, ['contacts', out.dials, 'contacts']);
+  metrics.forEach(function (m) {
     h.roster_total[m[0]] = sum(m[1], m[2], onRoster);
     h.rawscan_total[m[0]] = sum(m[1], m[2], any);
   });

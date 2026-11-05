@@ -1,6 +1,6 @@
 import { h } from '../dom.js';
-import { DEPARTED_KEY, fmtInt, dayLabel, addDays, dateRange, monthBounds, ctClock } from '../data.js';
-import { tag } from '../ui.js';
+import { DEPARTED_KEY, fmtInt, dayLabel, addDays, dateRange, monthBounds, ctClock, hasContacts } from '../data.js';
+import { tag, defLink } from '../ui.js';
 import { DIAL_TARGET } from '../../config.js';
 
 // Tab 7, Data Health & Definitions: every disagreement made cheap to settle, then the
@@ -45,7 +45,16 @@ function sources(p) {
         h('tr', null, h('th', { scope: 'row' }, 'C · routing: Leads'), h('td', null, ok(s.router)), h('td', null, span(c.leads_from, c.leads_to)), h('td', null, stamp('Leads'))),
         h('tr', null, h('th', { scope: 'row' }, 'C · routing: Daily'), h('td', null, ok(s.router)), h('td', null, span(c.daily_from, c.daily_to)), h('td', null, stamp('Daily'))),
         h('tr', null, h('th', { scope: 'row' }, 'C · routing: First touch by'), h('td', null, ok(s.router)), h('td', null, '—'), h('td', null, stamp('First touch by'))))),
+    contactsLine(p),
     h('p', { class: 'sub faint' }, 'Any window that reaches before a source starts shows "no data", never 0. Every view defaults to a date range, never all time.'));
+}
+
+function contactsLine(p) {
+  const x = p.health;
+  if (!p.sources.kpi.ok) return null;
+  if (!x.contacts_col) return h('p', { class: 'sub' }, h('span', { class: 'state st-behind' }, '✗'), ' Contacts: the dialer feed has no "Calls Over 60s" column right now, so contacts are hidden everywhere (not shown as 0).');
+  return h('p', { class: 'sub' }, defLink('contacts-60', 'Contacts'), ` come from _Dials column ${x.contacts_col} (Calls Over 60s). Setter-days with more contacts than dials: `,
+    x.contacts_over_dials ? h('strong', null, fmtInt(x.contacts_over_dials)) : '0', x.contacts_over_dials ? ' (should never happen; worth asking whoever runs the feed).' : '.');
 }
 
 function extents(p) {
@@ -75,11 +84,12 @@ function totals(p, ix) {
   const [mFrom] = monthBounds(p.today_ct);
   const metrics = [
     ['Dials', p.dials, 'date', 'dials'],
+    hasContacts(p) ? ['Contacts', p.dials, 'date', 'contacts'] : null,
     ['Booked', p.booked, 'date_booked', 'booked'],
     ['Showed', p.outcomes, 'appt_date', 'showed'],
     ['Qualified shows', p.outcomes, 'appt_date', 'qualified_show'],
     ['Pending', p.pending, 'appt_date', 'pending']
-  ];
+  ].filter(Boolean);
   const group = name => (ix.isTeam(name) ? 'team' : name === DEPARTED_KEY ? 'departed' : 'other');
   const sums = (arr, dateKey, field, from) => {
     const t = { team: 0, departed: 0, other: 0 };
@@ -100,7 +110,7 @@ function totals(p, ix) {
           h('td', { class: 'num' }, fmtInt(m.team)), h('td', { class: 'num' }, fmtInt(raw(m))), h('td', { class: 'num' }, diff(m)),
           h('td', { class: 'num' }, fmtInt(a.team)), h('td', { class: 'num' }, fmtInt(raw(a))), h('td', { class: 'num' }, diff(a)));
       }))),
-    h('p', { class: 'sub faint' }, 'Hover a difference to split it into departed and not-on-roster. Booked by Date Booked; Showed, Qualified shows and Pending by Appointment Date; Dials by dialer date.'));
+    h('p', { class: 'sub faint' }, 'Hover a difference to split it into departed and not-on-roster. Booked by Date Booked; Showed, Qualified shows and Pending by Appointment Date; Dials and Contacts by dialer date.'));
 }
 
 // ---------------------------------------------------------------- roster and aliases
@@ -259,6 +269,7 @@ export const GLOSSARY = [
   ['no-coverage', 'No dial coverage', 'The dialer stores no rows at all for this name. Shown as hatched “no data”, never as 0 dials.'],
   ['dial-target', 'Dial target', `${DIAL_TARGET ?? 'No'} dials per setter per day: the dotted tick on dial bars. The team pace bar fills toward that × the live (non-onboarding) setters who have dial coverage. There is no separate team target.`],
   ['talk', 'Talk time and seconds per dial', 'Summed from the dialer’s Talk Seconds and formatted once at the end. Seconds per dial = talk seconds ÷ dials. The sheet’s own Talk Time text column is never added up.'],
+  ['contacts-60', 'Contacts and contact rate', 'Dialer calls that were picked up and lasted 61 seconds or longer, from the dialer feed’s Calls Over 60s column, counted by the dialer’s date and refreshed every 5 minutes (today’s number grows during the day). A voicemail that ran past 60 seconds counts too: the phone system can’t tell a person from a voicemail. Contact rate = contacts ÷ dials. Filled back to 2026-07-14.'],
   ['answered', 'Answered (not shown)', 'The dialer’s own footnote: Answered is “the number picked up — a person OR a voicemail; the phone system cannot tell them apart.” Collected, not shown, pending a definition.'],
   ['booked', 'Booked', 'Appointment rows counted by Date Booked. Credit lands on the day the booking was made: a booking made on the 30th for a meeting on the 5th belongs to the 30th. Today’s figure is always “entered so far”: the tracker often trails the floor.'],
   ['outcomes', 'Showed · No Show · Rescheduled', 'Counted by Appointment Date, from Status. Same rows as Booked, different date column, so they are never put in one table under one date filter. Rescheduled has never occurred in the data.'],
@@ -269,7 +280,7 @@ export const GLOSSARY = [
   ['pay-eligible', 'Pay Eligible', 'The tracker’s own flag, read as-is and never recomputed. It doesn’t always agree with Qualified Show; the sheet’s flag wins, and disagreements are counted on this page, not on anyone’s card.'],
   ['maturity', 'Maturity', 'Of the appointments dated before today in a window, the share that has an outcome. Outcomes land late (about a third the same day, most within a week), so a window under 95% resolved reads low and carries a banner.'],
   ['cohort', 'Booking cohort (Deep Dive funnel)', 'The appointments booked in a window, followed to their outcome whenever it lands. One population, so each funnel step converts from the step above.'],
-  ['contacts', 'Contacts (self-reported)', 'The setter’s own conversation count from their EOD: a trend and compliance signal, not a system metric. Never divided by a dialer figure, never backfilled.'],
+  ['contacts', 'EOD contacts (self-reported)', 'The setter’s own conversation count from their EOD: a trend and compliance signal, not a system metric, and not the same as the dialer’s Contacts above. Never divided by a dialer figure, never backfilled.'],
   ['eod', 'EOD compliance', 'Active dialing days that have an EOD for that Report Date. The leftover test submission in row 2 is filtered out.'],
   ['booking-difference', 'Booking Difference', 'Reported booked minus what the tracker has: rows somebody still has to enter. A data-entry gap, not a performance metric; it never appears on a leaderboard.'],
   ['min-touch', 'Minutes to first touch', 'Reported as a median and a bucket distribution, never a mean (the never-touched tail wrecks a mean). Medians are computed over raw per-lead values, never averaged from daily medians. An untouched lead’s age is measured against the routing sheet’s own refresh stamp.'],

@@ -71,7 +71,7 @@ test('authorized payload: aggregates only, and nothing forbidden is read or ship
 
   // Read: only the allowed columns and rows, values via getDisplayValues, A1 of Leads as a note only.
   const allowedCols = {
-    '_Dials': [1, 2, 3, 5], '_EOD': [3, 4, 5, 6, 7, 8, 9, 10, 12, 14], '_Appointments': [1],
+    '_Dials': [1, 2, 3, 5, 7], '_EOD': [3, 4, 5, 6, 7, 8, 9, 10, 12, 14], '_Appointments': [1],
     'Appointment Tracker': [1, 2, 5, 7, 8, 10, 13, 15], 'Goals & Payroll': [1, 2, 3, 5],
     'Daily': [1, 2, 3, 4, 5, 6, 7, 8, 9], 'First touch by': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
     'Leads': [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15]
@@ -150,8 +150,8 @@ test('appointments: booked by Date Booked, outcomes by Appointment Date, and the
   assert.deepEqual(h.nonstandard_dates.map(d => d.cell).sort(), ['A16', 'E12']);
   assert.deepEqual(h.status_inventory.find(s => s.status === 'Left voicemail'), { n: 1, status: 'Left voicemail' });
 
-  assert.deepEqual(h.roster_total, { dials: 432, booked: 10, showed: 2, qualified_show: 2, pending: 4 });
-  assert.deepEqual(h.rawscan_total, { dials: 660, booked: 13, showed: 3, qualified_show: 3, pending: 4 });
+  assert.deepEqual(h.roster_total, { dials: 432, contacts: 84, booked: 10, showed: 2, qualified_show: 2, pending: 4 });
+  assert.deepEqual(h.rawscan_total, { dials: 660, contacts: 124, booked: 13, showed: 3, qualified_show: 3, pending: 4 });
 });
 
 test('roster: departed collapse, live with no data, aliases, unresolved names', () => {
@@ -170,6 +170,35 @@ test('roster: departed collapse, live with no data, aliases, unresolved names', 
   assert.ok(!p.dials.some(r => r.setter === 'Eli R'));
   assert.equal(p.health.distinct_names.dials, 6);
   assert.equal(p.health.rawscan_total.dials - p.health.roster_total.dials, sum(p.dials.filter(r => ['__departed__', 'Quinn Unknown'].includes(r.setter)), 'dials'));
+});
+
+test('contacts: Calls Over 60s summed per setter-day; a missing column drops contacts, not dials', () => {
+  const { ctx } = makeContext({ spreadsheets: fakeWorld() });
+  const p = post(ctx, { token: TOKEN });
+  assert.equal(p.health.contacts_col, 'G');
+  assert.equal(p.health.contacts_over_dials, 0);
+  const ava = p.dials.find(r => r.setter === 'Ava Testwell' && r.date === '2026-11-02');
+  assert.deepEqual(ava, { date: '2026-11-02', setter: 'Ava Testwell', dials: 40, talk_seconds: 1200, contacts: 8 });
+
+  const world = fakeWorld();
+  const dials = world['FAKE-KPI-SPREADSHEET-ID-0000000000000000000'].getSheetByName('_Dials');
+  dials.grid = dials.grid.map((r, i) => (i ? [...r.slice(0, 6), String(Number(r[2]) + 1)] : [...r.slice(0, 6), 'Calls Over 60 Seconds']));
+  const { ctx: ctx2 } = makeContext({ spreadsheets: world });
+  const q = post(ctx2, { token: TOKEN });
+  assert.equal(q.sources.kpi.ok, true);
+  assert.equal(q.health.contacts_col, null);
+  assert.equal(q.health.contacts_over_dials, null);
+  assert.ok(q.dials.length > 0 && q.dials.every(r => !('contacts' in r)));
+  assert.equal('contacts' in q.health.roster_total, false);
+  assert.deepEqual(q.health.headers_dropped.filter(d => d.tab === '_Dials'), [{ tab: '_Dials', col: 'G' }]);
+});
+
+test('contacts: a day with more contacts than dials is counted on Data Health', () => {
+  const world = fakeWorld();
+  const dials = world['FAKE-KPI-SPREADSHEET-ID-0000000000000000000'].getSheetByName('_Dials');
+  dials.grid[1] = [...dials.grid[1].slice(0, 6), '999'];
+  const { ctx } = makeContext({ spreadsheets: world });
+  assert.equal(post(ctx, { token: TOKEN }).health.contacts_over_dials, 1);
 });
 
 test('EOD: test row dropped, latest submission stands', () => {

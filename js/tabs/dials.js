@@ -1,5 +1,5 @@
 import { h, s } from '../dom.js';
-import { DEPARTED_KEY, WINDOWS, MAX_CUSTOM_DAYS, fmtInt, fmtDuration, bySetter, dayLabel, addDays, dateRange, resolveWindow, percentile } from '../data.js';
+import { DEPARTED_KEY, WINDOWS, MAX_CUSTOM_DAYS, fmtInt, fmtDuration, bySetter, dayLabel, addDays, dateRange, resolveWindow, percentile, hasContacts, fmtPct1 } from '../data.js';
 import { tag, segmented, customRange, defLink } from '../ui.js';
 
 // Tab 2, Dials & Activity: setters x days, one cell per day, on one sequential ramp
@@ -8,8 +8,12 @@ import { tag, segmented, customRange, defLink } from '../ui.js';
 
 const METRICS = {
   dials: { label: 'Dials', of: r => r.dials, cell: v => fmtInt(v), long: v => `${fmtInt(v)} dials` },
+  contacts: { label: 'Contacts', of: r => r.contacts, cell: v => fmtInt(v), long: v => `${fmtInt(v)} contacts (calls over 60s)`, needsContacts: true },
+  rate: { label: 'Contact rate', of: r => (r.dials > 0 ? r.contacts / r.dials : null), cell: v => fmtPct1(v), long: v => `${fmtPct1(v)} of dials were contacts`,
+    none: 'no contact rate', ratio: true, needsContacts: true },
   talk: { label: 'Talk time', of: r => r.talk_seconds, cell: v => shortDuration(v), long: v => `${fmtDuration(v)} talk` },
-  spd: { label: 'Seconds per dial', of: r => (r.dials > 0 ? r.talk_seconds / r.dials : null), cell: v => `${Math.round(v)}s`, long: v => `${Math.round(v)} seconds per dial` }
+  spd: { label: 'Seconds per dial', of: r => (r.dials > 0 ? r.talk_seconds / r.dials : null), cell: v => `${Math.round(v)}s`, long: v => `${Math.round(v)} seconds per dial`,
+    none: 'no seconds per dial', ratio: true }
 };
 const STEPS = 5;
 
@@ -34,6 +38,9 @@ function content(p, ix, draw) {
   if (!p.sources.kpi.ok) {
     return [h('div', { class: 'banner banner-warn' }, "Sheet A couldn't be read, so there are no dial counts right now. The grid comes back on the next successful refresh.")];
   }
+  const contactsOk = hasContacts(p);
+  const metrics = Object.entries(METRICS).filter(([, m]) => contactsOk || !m.needsContacts);
+  if (!metrics.some(([k]) => k === view.metric)) view.metric = 'dials';
   const M = METRICS[view.metric];
   const win = resolveWindow(view, p.today_ct);
   const dates = dateRange(win.from, win.to);
@@ -47,8 +54,9 @@ function content(p, ix, draw) {
     const present = days.filter(Boolean);
     const dials = present.reduce((t, r) => t + r.dials, 0);
     const talk = present.reduce((t, r) => t + r.talk_seconds, 0);
+    const contacts = present.reduce((t, r) => t + (r.contacts || 0), 0);
     return {
-      setter, days, dials, talk, booked: booked.get(setter) || 0,
+      setter, days, dials, talk, contacts, booked: booked.get(setter) || 0,
       active: present.filter(r => r.dials > 0).length,
       trend: dates30.map(d => { const r = byKey.get(`${setter}|${d}`); return r ? M.of(r) : null; })
     };
@@ -75,15 +83,17 @@ function content(p, ix, draw) {
     if (!rows.length) return null;
     const dials = rows.reduce((t, r) => t + r.dials, 0);
     const talk = rows.reduce((t, r) => t + r.talk_seconds, 0);
-    return M.of({ dials, talk_seconds: talk });
+    const contacts = rows.reduce((t, r) => t + (r.contacts || 0), 0);
+    return M.of({ dials, talk_seconds: talk, contacts });
   });
-  const teamTotals = withCoverage.reduce((t, r) => ({ dials: t.dials + r.dials, talk: t.talk + r.talk, active: t.active + r.active }), { dials: 0, talk: 0, active: 0 });
+  const teamTotals = withCoverage.reduce((t, r) => ({ dials: t.dials + r.dials, talk: t.talk + r.talk, contacts: t.contacts + r.contacts, active: t.active + r.active }),
+    { dials: 0, talk: 0, contacts: 0, active: 0 });
 
   const controls = h('div', { class: 'controls' },
     segmented('Window', WINDOWS, view.window, v => { view.window = v; draw(); }),
     view.window === 'custom' ? customRange(view, win, p.today_ct, draw) : null,
     h('span', { class: 'controls-gap' }),
-    segmented('Cell shows', Object.entries(METRICS).map(([k, m]) => [k, m.label]), view.metric, v => { view.metric = v; draw(); }));
+    segmented('Cell shows', metrics.map(([k, m]) => [k, m.label]), view.metric, v => { view.metric = v; draw(); }));
 
   const notes = [];
   if (p.coverage.dials_from && win.from < p.coverage.dials_from) notes.push(`The dialer feed starts ${dayLabel(p.coverage.dials_from)}, ${p.coverage.dials_from.slice(0, 4)}; earlier days are hatched "no data", not zeros.`);
@@ -96,7 +106,9 @@ function content(p, ix, draw) {
         h('h2', { id: 'heat-title' }, `${M.label} per setter per day`),
         h('p', { class: 'sub' }, `${dayLabel(win.from)} – ${dayLabel(win.to)} · ${win.days} days · by dialer date · booked by Date Booked`),
         h('p', { class: 'sub' }, `Everyone on the dialer: ${fmtInt(teamTotals.dials)} dials on ${fmtInt(teamTotals.active)} active setter-days ` +
-          `(${teamTotals.active ? fmtInt(teamTotals.dials / teamTotals.active) : '—'} per active day) · ${fmtDuration(teamTotals.talk)} talk` +
+          `(${teamTotals.active ? fmtInt(teamTotals.dials / teamTotals.active) : '—'} per active day)` +
+          (contactsOk ? ` · ${fmtInt(teamTotals.contacts)} contacts (${teamTotals.dials ? fmtPct1(teamTotals.contacts / teamTotals.dials) : '—'} of dials)` : '') +
+          ` · ${fmtDuration(teamTotals.talk)} talk` +
           (teamTotals.dials ? ` · ${Math.round(teamTotals.talk / teamTotals.dials)}s per dial` : '')),
         notes.map(n => h('p', { class: 'sub faint' }, n))),
       h('div', { class: 'heat-scroll' },
@@ -104,12 +116,15 @@ function content(p, ix, draw) {
       legend(M, top)),
     h('p', { class: 'sub faint' }, defLink('active-day', 'Active day'),
       ' = a day with dials > 0; per-day averages divide by active days, not calendar days. The dialer stores a row for every rostered setter every day, ' +
-      "including days before they started, so a 0 doesn't prove anyone was working.")
+      "including days before they started, so a 0 doesn't prove anyone was working.",
+      contactsOk ? [' ', defLink('contacts-60', 'Contacts'), ' = dialer calls over 60 seconds (voicemails that long included); contact rate = contacts ÷ dials.'] : null)
   ];
 
   function windowValue(r) {
     if (view.metric === 'dials') return r.dials;
+    if (view.metric === 'contacts') return r.contacts;
     if (view.metric === 'talk') return r.talk;
+    if (view.metric === 'rate') return r.dials ? r.contacts / r.dials : -1;
     return r.dials ? r.talk / r.dials : -1;
   }
 }
@@ -126,7 +141,7 @@ function heatTable(dates, today, rows, noCoverage, team, M, step, ix) {
         h('span', { class: 'dow' }, dayLabel(d).slice(0, 1)),
         h('span', { class: 'dom' }, String(day)));
     }),
-    h('th', { scope: 'col', class: 'num' }, view.metric === 'spd' ? 'Window' : 'Total'),
+    h('th', { scope: 'col', class: 'num' }, M.ratio ? 'Window' : 'Total'),
     h('th', { scope: 'col', class: 'num' }, 'Active days'),
     h('th', { scope: 'col', class: 'num' }, 'Per active day'),
     h('th', { scope: 'col', class: 'num' }, 'Booked'),
@@ -173,7 +188,7 @@ function cell(row, date, today, M, step, who) {
   if (!row) return noDataCell(date, who);
   const v = M.of(row);
   const isToday = date === today ? ' is-today' : '';
-  if (v == null) return h('td', { class: 'hc s0' + isToday, title: `${who} · ${dayLabel(date)}: 0 dials, so no seconds per dial` }, '–');
+  if (v == null) return h('td', { class: 'hc s0' + isToday, title: `${who} · ${dayLabel(date)}: 0 dials, so ${M.none}` }, '–');
   return h('td', { class: `hc s${step(v)}${isToday}`, title: `${who} · ${dayLabel(date)}: ${M.long(v)}` }, M.cell(v));
 }
 
@@ -183,13 +198,16 @@ function noDataCell(date, who) {
 
 function windowCell(r, M) {
   if (view.metric === 'dials') return fmtInt(r.dials);
+  if (view.metric === 'contacts') return fmtInt(r.contacts);
   if (view.metric === 'talk') return fmtDuration(r.talk);
-  return r.dials ? M.cell(r.talk / r.dials) : '—';
+  if (!r.dials) return '—';
+  return M.cell(view.metric === 'rate' ? r.contacts / r.dials : r.talk / r.dials);
 }
 
 function perActiveDay(r) {
-  if (!r.active || view.metric === 'spd') return '—';
-  return view.metric === 'dials' ? fmtInt(r.dials / r.active) : fmtDuration(r.talk / r.active);
+  if (!r.active || METRICS[view.metric].ratio) return '—';
+  if (view.metric === 'talk') return fmtDuration(r.talk / r.active);
+  return fmtInt((view.metric === 'contacts' ? r.contacts : r.dials) / r.active);
 }
 
 /** 30 days, the row's own scale; gaps where the dialer has no row. The latest day is the accent dot. */
@@ -231,5 +249,6 @@ function shortDuration(seconds) {
 function compact(v, M) {
   if (M === METRICS.talk) return `${Math.round(v / 3600)}h`;
   if (M === METRICS.spd) return `${Math.round(v)}s`;
+  if (M === METRICS.rate) return `${Math.round(100 * v)}%`;
   return v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}K` : String(Math.round(v));
 }

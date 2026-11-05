@@ -13,7 +13,7 @@ const FORBIDDEN = ['Prospect', 'Notes', 'CRM', 'Base Pay', 'Amount Due', 'Pay Ru
 const SPEED_FIELDS = ['leads', 'touched', 'untouched', 'within_1h', 'booked', 'median_min'];
 const FT_FIELDS = ['first_touches', 'own', 'house', 'other', 'by_call', 'by_text', 'within_1h', 'booked', 'median_min'];
 const ARRAYS = {
-  dials: [['date', 'setter'], ['dials', 'talk_seconds']],
+  dials: [['date', 'setter'], ['dials', 'talk_seconds', 'contacts']],
   booked: [['date_booked', 'setter'], ['booked']],
   outcomes: [['appt_date', 'setter'], ['showed', 'no_show', 'rescheduled', 'canceled', 'other_status', 'qualified_show', 'pay_eligible']],
   pending: [['appt_date', 'setter'], ['pending']],
@@ -53,6 +53,8 @@ export async function runChecks({ payload: p, text }) {
   const days = daysBetween(p.coverage.dials_from, p.coverage.dials_to) + 1;
   add('Row extents', '_Dials rows = days covered × setters stored', `${fmtInt(h.data_rows.dials)} vs ${days} × ${h.distinct_names.dials} = ${fmtInt(days * h.distinct_names.dials)}`,
     'equal', h.data_rows.dials === days * h.distinct_names.dials ? 'pass' : 'fail', `Coverage ${p.coverage.dials_from} → ${p.coverage.dials_to}. Holds every day, unlike the golden row count.`);
+  add('Row extents', '_Dials Calls Over 60s: setter-days with more contacts than dials', h.contacts_col ? fmtInt(h.contacts_over_dials) : 'column not found', '0',
+    h.contacts_col && h.contacts_over_dials === 0 ? 'pass' : 'fail', h.contacts_col ? `Read from column ${h.contacts_col}. Contacts are a subset of dials.` : 'Without the column, contacts are hidden everywhere.');
   add('Row extents', 'B · Appointment Tracker last populated row', `${h.last_row.tracker} (${fmtInt(h.data_rows.tracker)} rows)`, '1186 (1,182 rows)',
     golden(h.last_row.tracker, 1186), `Headers on row 4, data from row 5. The tab's grid is ${fmtInt(h.grid_rows.tracker)} rows.`);
   const a = h.a_appt_rows;

@@ -32,6 +32,7 @@ test('every structural and privacy row passes on a well-formed payload', async (
     'EOD leftover test row (row 2) filtered',
     "Per-lead figures (Leads B–K + O) vs sheet C's own 'All' rows, date by date",
     '_Dials rows = days covered × setters stored',
+    '_Dials Calls Over 60s: setter-days with more contacts than dials',
     'Column headers dropped by the allowlist'
   ]) assert.equal(rows[check].status, 'pass', `${check}: ${rows[check].computed} / ${rows[check].note}`);
   assert.equal(rows['Rescheduled count, all time'].status, 'fail'); // the fake tracker has one
