@@ -4,7 +4,8 @@ import { tag, segmented, customRange, defLink } from '../ui.js';
 
 // Tab 2, Dials & Activity: setters x days, one cell per day, on one sequential ramp
 // anchored at 0 and the window's 95th percentile. A day the dialer has no row for is
-// hatched "no data", never a 0. Counted by the dialer's date.
+// hatched "no data", never a 0. Counted by the dialer's date. Below it, the same window
+// for new leads per setter, from the routing sheet's Daily tab by the lead's own date.
 
 const METRICS = {
   dials: { label: 'Dials', of: r => r.dials, cell: v => fmtInt(v), long: v => `${fmtInt(v)} dials` },
@@ -26,8 +27,7 @@ export function renderDials(p, ix) {
     root.replaceChildren(...content(p, ix, draw));
     // On a narrow screen, open on the newest days rather than the oldest.
     requestAnimationFrame(() => {
-      const box = root.querySelector('.heat-scroll');
-      if (box && box.scrollWidth > box.clientWidth) box.scrollLeft = box.scrollWidth;
+      for (const box of root.querySelectorAll('.heat-scroll')) if (box.scrollWidth > box.clientWidth) box.scrollLeft = box.scrollWidth;
     });
   };
   draw();
@@ -36,7 +36,13 @@ export function renderDials(p, ix) {
 
 function content(p, ix, draw) {
   if (!p.sources.kpi.ok) {
-    return [h('div', { class: 'banner banner-warn' }, "Sheet A couldn't be read, so there are no dial counts right now. The grid comes back on the next successful refresh.")];
+    const win = resolveWindow(view, p.today_ct);
+    return [
+      h('div', { class: 'controls' },
+        segmented('Window', WINDOWS, view.window, v => { view.window = v; draw(); }),
+        view.window === 'custom' ? customRange(view, win, p.today_ct, draw) : null),
+      h('div', { class: 'banner banner-warn' }, "Sheet A couldn't be read, so there are no dial counts right now. The grid comes back on the next successful refresh."),
+      leadsCard(p, ix, win)];
   }
   const contactsOk = hasContacts(p);
   const metrics = Object.entries(METRICS).filter(([, m]) => contactsOk || !m.needsContacts);
@@ -76,7 +82,7 @@ function content(p, ix, draw) {
   // can't wash the grid out. Values above it share the darkest step.
   const cellValues = withCoverage.flatMap(r => r.days.filter(Boolean).map(M.of)).filter(v => v != null);
   const top = percentile(cellValues, 0.95) || 1;
-  const step = v => (v === 0 ? 0 : 1 + Math.min(STEPS - 1, Math.floor((Math.min(v, top) / top) * STEPS - 1e-9)));
+  const step = stepper(top);
 
   const team = dates.map(d => {
     const rows = p.dials.filter(r => r.date === d);
@@ -113,11 +119,12 @@ function content(p, ix, draw) {
         notes.map(n => h('p', { class: 'sub faint' }, n))),
       h('div', { class: 'heat-scroll' },
         heatTable(dates, p.today_ct, withCoverage, noCoverage, team, M, step, ix)),
-      legend(M, top)),
+      legend(M.cell(top))),
     h('p', { class: 'sub faint' }, defLink('active-day', 'Active day'),
       ' = a day with dials > 0; per-day averages divide by active days, not calendar days. The dialer stores a row for every rostered setter every day, ' +
       "including days before they started, so a 0 doesn't prove anyone was working.",
-      contactsOk ? [' ', defLink('contacts-60', 'Contacts'), ' = dialer calls over 60 seconds (voicemails that long included); contact rate = contacts ÷ dials.'] : null)
+      contactsOk ? [' ', defLink('contacts-60', 'Contacts'), ' = dialer calls over 60 seconds (voicemails that long included); contact rate = contacts ÷ dials.'] : null),
+    leadsCard(p, ix, win)
   ];
 
   function windowValue(r) {
@@ -133,14 +140,7 @@ function heatTable(dates, today, rows, noCoverage, team, M, step, ix) {
   const teamTop = Math.max(...team.filter(v => v != null), 1);
   const head = h('tr', null,
     h('th', { scope: 'col', class: 'who sticky' }, 'Setter'),
-    dates.map((d, i) => {
-      const day = Number(d.slice(8));
-      const monthMark = i === 0 || day === 1 ? dayLabel(d).split(', ')[1].split(' ')[0] : '';
-      return h('th', { scope: 'col', class: 'day' + (d === today ? ' is-today' : ''), title: dayLabel(d) + (d === today ? ' (today, so far)' : '') },
-        h('span', { class: 'month' }, monthMark || ' '),
-        h('span', { class: 'dow' }, dayLabel(d).slice(0, 1)),
-        h('span', { class: 'dom' }, String(day)));
-    }),
+    dayHeads(dates, today),
     h('th', { scope: 'col', class: 'num' }, M.ratio ? 'Window' : 'Total'),
     h('th', { scope: 'col', class: 'num' }, 'Active days'),
     h('th', { scope: 'col', class: 'num' }, 'Per active day'),
@@ -157,8 +157,8 @@ function heatTable(dates, today, rows, noCoverage, team, M, step, ix) {
     h('td', { class: 'trend' }, sparkline(r.trend, M))));
 
   const uncovered = noCoverage.length ? [
-    h('tr', { class: 'heat-divider' }, h('th', { scope: 'rowgroup', colspan: dates.length + 6, class: 'sticky-label' },
-      `No dial coverage (${noCoverage.length}): the dialer stores no rows for these names, so every day is "no data", not 0`)),
+    h('tr', { class: 'heat-divider' }, h('th', { scope: 'rowgroup', colspan: dates.length + 6 }, h('span', { class: 'sticky-label' },
+      `No dial coverage (${noCoverage.length}): the dialer stores no rows for these names, so every day is "no data", not 0`))),
     ...noCoverage.map(r => h('tr', { class: 'is-uncovered' },
       h('th', { scope: 'row', class: 'who sticky' }, ix.label(r.setter), tag(ix.status(r.setter))),
       dates.map(d => noDataCell(d, ix.label(r.setter))),
@@ -182,6 +182,22 @@ function heatTable(dates, today, rows, noCoverage, team, M, step, ix) {
     h('thead', null, head),
     h('tbody', null, body, uncovered),
     h('tfoot', null, foot));
+}
+
+function dayHeads(dates, today) {
+  return dates.map((d, i) => {
+    const day = Number(d.slice(8));
+    const monthMark = i === 0 || day === 1 ? dayLabel(d).split(', ')[1].split(' ')[0] : '';
+    return h('th', { scope: 'col', class: 'day' + (d === today ? ' is-today' : ''), title: dayLabel(d) + (d === today ? ' (today, so far)' : '') },
+      h('span', { class: 'month' }, monthMark || ' '),
+      h('span', { class: 'dow' }, dayLabel(d).slice(0, 1)),
+      h('span', { class: 'dom' }, String(day)));
+  });
+}
+
+/** Colour step 0-5: 0 to `top` (the window's 95th percentile); values above it share the darkest step. */
+function stepper(top) {
+  return v => (v === 0 ? 0 : 1 + Math.min(STEPS - 1, Math.floor((Math.min(v, top) / top) * STEPS - 1e-9)));
 }
 
 function cell(row, date, today, M, step, who) {
@@ -231,14 +247,107 @@ function sparkline(values, M) {
   last != null ? s('circle', { cx: x(lastIdx).toFixed(1), cy: y(last).toFixed(1), r: 2.5, class: 'spark-now' }) : null);
 }
 
-function legend(M, top) {
+function legend(topText, noData = defLink('no-coverage', 'no data')) {
   return h('div', { class: 'heat-legend', 'aria-label': 'Colour key' },
     h('span', { class: 'faint' }, 'Key'),
     h('span', { class: 'hc s0 key' }, '0'),
     [1, 2, 3, 4, 5].map(i => h('span', { class: `hc s${i} key` })),
-    h('span', { class: 'faint' }, `${M.cell(top)}+ (95th percentile of this window)`),
+    h('span', { class: 'faint' }, `${topText}+ (95th percentile of this window)`),
     h('span', { class: 'hc nodata key' }),
-    h('span', { class: 'faint' }, defLink('no-coverage', 'no data')));
+    h('span', { class: 'faint' }, noData));
+}
+
+// ---------------------------------------------------------------- new leads per setter per day
+
+/**
+ * Sheet C's Daily tab: leads by the lead's own date, credited to the setter the router assigned
+ * (its Setter column). From the sheet's first day on, no row means 0 leads; before it, "no data".
+ */
+function leadsCard(p, ix, win) {
+  const title = h('h2', { id: 'leads-title' }, defLink('new-leads', 'New leads per setter per day'));
+  if (!p.sources.router.ok) {
+    return h('section', { class: 'card heat-card' }, title,
+      h('p', { class: 'faint' }, "Sheet C (setter routing) couldn't be read, so there are no lead counts right now."));
+  }
+  const today = p.today_ct;
+  const start = p.coverage.daily_from;
+  const dates = dateRange(win.from, win.to);
+  const covered = dates.map(d => Boolean(start) && d >= start);
+  const inWin = r => r.date >= win.from && r.date <= win.to;
+  const tally = (arr, key) => {
+    const m = new Map();
+    for (const r of arr) if (inWin(r)) m.set(`${r[key]}|${r.date}`, (m.get(`${r[key]}|${r.date}`) || 0) + r.leads);
+    return m;
+  };
+  const row = (name, days) => {
+    const vals = dates.map((d, i) => (covered[i] ? days.get(`${name}|${d}`) || 0 : null));
+    return { name, vals, total: vals.reduce((t, v) => t + (v || 0), 0) };
+  };
+  const byTotal = label => (a, b) => b.total - a.total || label(a.name).localeCompare(label(b.name));
+
+  // A row for anyone the router sent leads to in the window (departed people as one row);
+  // live-roster setters who got none are listed in one line under the grid.
+  const setterDays = tally(p.speed_daily, 'setter');
+  const setters = [...new Set(p.speed_daily.filter(r => inWin(r) && r.leads > 0).map(r => r.setter))].map(n => row(n, setterDays)).sort(byTotal(ix.label));
+  const none = covered.some(Boolean) ? p.roster.filter(r => r.active && !setters.some(x => x.name === r.setter)).map(r => ix.label(r.setter)).sort() : [];
+  const queueDays = tally(p.speed_daily_queues, 'queue');
+  const queues = [...new Set(p.speed_daily_queues.filter(r => inWin(r) && r.leads > 0).map(r => r.queue))].map(n => row(n, queueDays)).sort(byTotal(n => n));
+  const everyone = setters.concat(queues);
+  const toSetters = setters.reduce((t, r) => t + r.total, 0);
+  const all = everyone.reduce((t, r) => t + r.total, 0);
+  const team = dates.map((d, i) => (covered[i] ? everyone.reduce((t, r) => t + r.vals[i], 0) : null));
+  const top = percentile(everyone.flatMap(r => r.vals).filter(v => v != null), 0.95) || 1;
+  const step = stepper(top);
+
+  const leads = n => (n === 1 ? '1 new lead' : `${fmtInt(n)} new leads`);
+  const share = n => (all ? `${Math.round((100 * n) / all)}%` : '—');
+  const line = (r, label, mark, cls) => h('tr', { class: cls },
+    h('th', { scope: 'row', class: 'who sticky' }, label, mark),
+    r.vals.map((v, i) => (v == null ? noDataCell(dates[i], label)
+      : h('td', { class: `hc s${step(v)}${dates[i] === today ? ' is-today' : ''}`, title: `${label} · ${dayLabel(dates[i])}: ${leads(v)}${dates[i] === today ? ' so far' : ''}` }, fmtInt(v)))),
+    h('td', { class: 'num strong' }, fmtInt(r.total)),
+    h('td', { class: 'num' }, share(r.total)));
+  const teamTop = Math.max(...team.filter(v => v != null), 1);
+  const foot = h('tr', { class: 'team-row' },
+    h('th', { scope: 'row', class: 'who sticky' }, 'All leads', h('span', { class: 'faint team-sub' }, 'setters and queues')),
+    team.map((v, i) => {
+      if (v == null) return h('td', { class: 'col-cell', title: `${dayLabel(dates[i])}: no data` }, h('span', { class: 'sr-only' }, 'no data'));
+      const bar = h('div', { class: 'col-bar' });
+      bar.style.height = `${Math.max(2, (34 * v) / teamTop).toFixed(1)}px`;
+      return h('td', { class: 'col-cell', title: `${dayLabel(dates[i])}: ${leads(v)}${dates[i] === today ? ' so far' : ''}` },
+        h('span', { class: 'col-val' }, String(v)), h('div', { class: 'col-track' }, bar));
+    }),
+    h('td', { class: 'num strong' }, fmtInt(all)),
+    h('td'));
+
+  const notes = [];
+  if (!start) notes.push('The routing sheet has no daily rows yet, so every day is "no data".');
+  else if (win.from < start) notes.push(`The routing sheet starts ${dayLabel(start)}, ${start.slice(0, 4)}; earlier days are hatched "no data", not zeros.`);
+
+  return h('section', { class: 'card heat-card', 'aria-labelledby': 'leads-title' },
+    h('div', { class: 'card-head' },
+      title,
+      h('p', { class: 'sub' }, `${dayLabel(win.from)} – ${dayLabel(win.to)} · ${win.days} days · by the lead's date · same window as the dials grid`),
+      h('p', { class: 'sub' }, [`${leads(all)} in the window: ${fmtInt(toSetters)} to setters`, ...queues.map(q => `${fmtInt(q.total)} in ${q.name}`)].join(' · ')),
+      notes.map(n => h('p', { class: 'sub faint' }, n))),
+    h('div', { class: 'heat-scroll' },
+      h('table', { class: 'heat' },
+        h('thead', null, h('tr', null,
+          h('th', { scope: 'col', class: 'who sticky' }, 'Setter'),
+          dayHeads(dates, today),
+          h('th', { scope: 'col', class: 'num' }, 'Total'),
+          h('th', { scope: 'col', class: 'num', title: 'Share of every new lead in the window, queues included' }, 'Share'))),
+        h('tbody', null,
+          setters.map(r => line(r, ix.label(r.name), tag(ix.status(r.name)))),
+          queues.length ? [
+            h('tr', { class: 'heat-divider' }, h('th', { scope: 'rowgroup', colspan: dates.length + 3 }, h('span', { class: 'sticky-label' }, 'Queues: leads not assigned to a setter'))),
+            ...queues.map(r => line(r, r.name, h('span', { class: 'tag' }, 'queue'), 'is-queue'))
+          ] : []),
+        h('tfoot', null, foot))),
+    none.length ? h('p', { class: 'sub' }, `No new leads in this window (${none.length}): ${none.join(', ')}`) : null,
+    legend(fmtInt(top), 'before the routing sheet starts'),
+    h('p', { class: 'sub faint' }, "Credited to the setter the router assigned (its Setter column), by rotation or by hand; that never changes when someone else picks the lead up. " +
+      'Share = their leads ÷ every new lead in the window, queues included.'));
 }
 
 function shortDuration(seconds) {

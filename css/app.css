@@ -309,8 +309,9 @@ a { color: var(--accent); }
 .nodata { background: repeating-linear-gradient(135deg, transparent 0 4px, var(--hatch) 4px 5.5px); }
 
 .heat-divider th { text-align: left; font-size: 12px; font-weight: 600; color: var(--text-2); padding: 14px 0 4px; }
-.heat .sticky-label { position: sticky; left: 0; }
+.heat .sticky-label { position: sticky; left: 0; display: inline-block; }
 .is-uncovered .who { color: var(--text-2); }
+.heat .is-queue .who { color: var(--text-2); }
 .uncovered-note { font-size: 12px; padding: 0 8px; white-space: nowrap; }
 
 .team-row th, .team-row td { padding-top: 10px; }
