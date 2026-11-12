@@ -234,7 +234,7 @@ a { color: var(--accent); }
 .meter-fill { height: 100%; background: var(--accent); border-radius: 0 4px 4px 0; }
 .meter-tick { position: absolute; top: 0; bottom: 0; border-left: 2px dotted var(--bg); }
 
-.tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; }
 .tile { gap: 4px; padding: 14px 16px; }
 .tile-value { font-size: clamp(28px, 3vw, 40px); font-weight: 650; line-height: 1.1; }
 .tile.is-unavailable .tile-value { color: var(--text-3); }
@@ -247,7 +247,7 @@ a { color: var(--accent); }
 .floor-table tbody tr:last-child > * { border-bottom: 0; }
 .floor-table .who { font-size: 18px; font-weight: 600; white-space: nowrap; }
 .floor-table .dials { font-size: 22px; font-weight: 650; width: 1%; }
-.floor-table .contacts, .floor-table .talk, .floor-table .booked { font-size: 17px; color: var(--text); width: 1%; }
+.floor-table .contacts, .floor-table .talk, .floor-table .leads, .floor-table .booked { font-size: 17px; color: var(--text); width: 1%; }
 .floor-table .contacts .rate { display: inline-block; min-width: 3.4em; margin-left: 4px; text-align: right; font-size: 13px; color: var(--text-3); }
 .floor-table .eod { width: 1%; white-space: nowrap; }
 .bar-col { width: 48%; min-width: 120px; }
@@ -628,30 +628,33 @@ a { color: var(--accent); }
 }
 
 @media (max-width: 1100px) {
-  .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
 @media (max-width: 760px) {
   .floor-top, .strip { grid-template-columns: minmax(0, 1fr); }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tiles > .tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .floor-table thead { display: none; }
   .floor-table, .floor-table tbody { display: block; }
-  /* One flex row per setter that wraps: name, EOD and dials; the bar; then contacts, talk, booked. */
+  /* One flex row per setter that wraps: name, EOD and dials; the bar; then contacts, talk, leads, booked. */
   .floor-table tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 10px 0; border-bottom: 1px solid var(--grid); }
   .floor-table tbody tr:last-child { border-bottom: 0; }
   .floor-table th, .floor-table td { padding: 0; border: 0; width: auto; }
-  .floor-table td.dials, .floor-table td.contacts, .floor-table td.talk, .floor-table td.booked, .floor-table td.eod { width: auto; }
+  .floor-table td.dials, .floor-table td.contacts, .floor-table td.talk, .floor-table td.leads, .floor-table td.booked, .floor-table td.eod { width: auto; }
   .floor-table .who { order: 1; flex: 1 1 0; min-width: 0; font-size: 16px; white-space: normal; }
   .floor-table td.eod { order: 2; }
   .floor-table .dials { order: 3; font-size: 20px; }
   .floor-table .bar-col { order: 4; flex: 1 0 100%; min-width: 0; }
-  .floor-table td.contacts, .floor-table td.talk, .floor-table td.booked { font-size: 13px; text-align: left; }
+  .floor-table td.contacts, .floor-table td.talk, .floor-table td.leads, .floor-table td.booked { font-size: 13px; text-align: left; }
   .floor-table td.contacts { order: 5; }
   .floor-table td.contacts .rate { min-width: 0; }
   .floor-table td.talk { order: 6; }
-  .floor-table td.booked { order: 7; }
+  .floor-table td.leads { order: 7; }
+  .floor-table td.booked { order: 8; }
   .floor-table td.contacts::before { content: 'Contacts '; color: var(--text-3); }
   .floor-table td.talk::before { content: 'Talk '; color: var(--text-3); }
+  .floor-table td.leads::before { content: 'Leads '; color: var(--text-3); }
   .floor-table td.booked::before { content: 'Booked '; color: var(--text-3); }
 }
 
