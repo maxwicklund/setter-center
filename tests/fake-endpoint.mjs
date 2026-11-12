@@ -241,11 +241,32 @@ function fakeRouter() {
   ]);
 }
 
+// Sheet D, the lead router: spend by day. Its other tabs hold lead and client names and are
+// never opened; reading any of them fails the read test.
+export function fakeAds() {
+  const R = (date, other, rw) => [date, `${S}-12`, `${S}-10`, `${S}-2`, `${S}-1`, `${S}-0`, other, `${S}-8%`, `${S}`, `${S}-9`, rw, `${S}-tail`];
+  const report = [['Date', 'Leads Generated', 'Qualified', 'Unqualified', 'Strategy Calls Booked', 'Disco Calls Booked', 'Ad Spend',
+    'Booked Call %', '', 'Leads to RetireWell', 'RetireWell Spend', `${S} header`],
+    R('2026-10-29', 'n/a', '$10.00'),            // unreadable: skipped and counted
+    R('2026-10-30', '$1,000.00', '$2,000.50'),
+    R('2026-10-31', '$500.00', '$1,500.00'),
+    R('2026-11-01', '$100.00', '$200.00'),
+    R('2026-11-01', '$50.00', '$25.25'),         // the date twice: summed and counted
+    R('2026-11-02', '', '')];                     // no spend yet: no data, never $0
+  return fakeSpreadsheet([
+    new FakeSheet('Client Data', [['Date & Time', 'Advisor', 'Lead Name'], ['x', 'x', `${S}-lead`]]),
+    new FakeSheet('Booked Appointments', [['Lead Name'], [`${S}-lead`]]),
+    new FakeSheet('Daily Report', report),
+    new FakeSheet('Appt Orders', [['Client Name'], [`${S}-client`]])
+  ]);
+}
+
 export function fakeWorld() {
   return {
     'FAKE-KPI-SPREADSHEET-ID-0000000000000000000': fakeKpi(),
     'FAKE-TRACKER-SPREADSHEET-ID-00000000000000': fakeTracker(),
-    'FAKE-ROUTER-SPREADSHEET-ID-000000000000000': fakeRouter()
+    'FAKE-ROUTER-SPREADSHEET-ID-000000000000000': fakeRouter(),
+    'FAKE-ADS-SPREADSHEET-ID-0000000000000000000': fakeAds()
   };
 }
 

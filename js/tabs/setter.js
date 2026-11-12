@@ -1,5 +1,5 @@
 import { h, s } from '../dom.js';
-import { DEPARTED_KEY, WINDOWS, fmtInt, fmtDuration, dayLabel, addDays, dateRange, monthBounds, monthElapsed, resolveWindow, hasContacts, contactRate, fmtPct1 } from '../data.js';
+import { DEPARTED_KEY, WINDOWS, fmtInt, fmtDuration, dayLabel, addDays, dateRange, monthBounds, monthElapsed, resolveWindow, hasContacts, contactRate, fmtPct1, contactToBooking } from '../data.js';
 import { tag, segmented, customRange, defLink } from '../ui.js';
 
 // Tab 4, Setter Deep Dive: one person, one page, read like a player card. Compared only
@@ -90,6 +90,7 @@ function activity(p, me, win, prior, team) {
   const teamPerDay = median(team.map(t => dialStats(p, t, win.from, win.to)).filter(st => st.active).map(st => st.dials / st.active));
   const teamSpd = median(team.map(t => dialStats(p, t, win.from, win.to)).filter(st => st.dials).map(st => st.talk / st.dials));
   const teamRate = median(team.map(t => dialStats(p, t, win.from, win.to)).filter(st => st.dials).map(st => st.contacts / st.dials));
+  const teamC2B = median(team.map(t => [bookedIn(p, t, win.from, win.to), dialStats(p, t, win.from, win.to).contacts]).filter(([, c]) => c).map(([b, c]) => b / c));
   const contactsTile = hasContacts(p) ? h('div', { class: 'mini-tile' },
     h('p', { class: 'label' }, defLink('contacts-60', 'Contacts')),
     h('p', { class: 'tile-value' }, fmtInt(now.contacts)),
@@ -112,7 +113,9 @@ function activity(p, me, win, prior, team) {
         h('p', { class: 'tile-value' }, fmtDuration(now.talk)),
         delta(now.talk, before.rows ? before.talk : null, 'previous period', fmtDuration),
         h('p', { class: 'sub' }, `${now.active ? fmtDuration(now.talk / now.active) : '—'} per active day`))),
-    h('div', { class: 'figures' },
+    h('div', { class: 'figures' + (hasContacts(p) ? ' figures-3' : '') },
+      hasContacts(p) ? figure(defLink('contact-to-booking', 'Contact to booking'), contactToBooking(booked, now.contacts),
+        now.contacts ? `${fmtInt(booked)} booked ÷ ${fmtInt(now.contacts)} contacts · team median ${teamC2B == null ? '—' : fmtPct1(teamC2B)}` : 'no contacts in this window') : null,
       figure('Dials per booking', booked ? fmtInt(now.dials / booked) : '—', booked ? `${fmtInt(now.dials)} dials ÷ ${fmtInt(booked)} booked (Date Booked)` : 'nothing booked in this window'),
       figure('Seconds per dial', now.dials ? `${Math.round(now.talk / now.dials)}s` : '—', `Team median ${teamSpd == null ? '—' : Math.round(teamSpd) + 's'}`)),
     h('p', { class: 'sub faint' }, 'By dialer date. Active day = a day with dials > 0.'));

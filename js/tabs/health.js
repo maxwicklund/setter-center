@@ -19,6 +19,7 @@ export function renderHealth(p, ix) {
       eodGrid(p, ix),
       bookingDifference(p, ix),
       speedHealth(p),
+      costHealth(p),
       security()),
     glossary());
 }
@@ -35,7 +36,7 @@ function sources(p) {
   const c = p.coverage;
   const span = (a, b) => (a ? `${a} → ${b}` : '—');
   return card('Sources and coverage',
-    h('p', { class: 'sub' }, `Snapshot fetched ${ctClock(p.as_of_ct)} for ${p.today_ct}. Sheets A and B carry no refresh stamp of their own, so they show when they were fetched; sheet C stamps itself.`),
+    h('p', { class: 'sub' }, `Snapshot fetched ${ctClock(p.as_of_ct)} for ${p.today_ct}. Sheets A, B and D carry no refresh stamp of their own, so they show when they were fetched; sheet C stamps itself.`),
     h('table', { class: 'mini-table' },
       h('thead', null, h('tr', null, ['Source', 'Read', 'Covers', 'Freshness'].map(t => h('th', { scope: 'col' }, t)))),
       h('tbody', null,
@@ -44,7 +45,8 @@ function sources(p) {
         h('tr', null, h('th', { scope: 'row' }, 'B · appointment tracker'), h('td', null, ok(s.tracker)), h('td', null, `booked ${span(c.appts_from, c.appts_to)} · dated ${span(c.appt_dates_from, c.appt_dates_to)}`), h('td', null, 'fetched ' + ctClock(p.as_of_ct))),
         h('tr', null, h('th', { scope: 'row' }, 'C · routing: Leads'), h('td', null, ok(s.router)), h('td', null, span(c.leads_from, c.leads_to)), h('td', null, stamp('Leads'))),
         h('tr', null, h('th', { scope: 'row' }, 'C · routing: Daily'), h('td', null, ok(s.router)), h('td', null, span(c.daily_from, c.daily_to)), h('td', null, stamp('Daily'))),
-        h('tr', null, h('th', { scope: 'row' }, 'C · routing: First touch by'), h('td', null, ok(s.router)), h('td', null, '—'), h('td', null, stamp('First touch by'))))),
+        h('tr', null, h('th', { scope: 'row' }, 'C · routing: First touch by'), h('td', null, ok(s.router)), h('td', null, '—'), h('td', null, stamp('First touch by'))),
+        s.ads ? h('tr', null, h('th', { scope: 'row' }, 'D · lead router: Daily Report spend'), h('td', null, ok(s.ads)), h('td', null, span(c.spend_from, c.spend_to)), h('td', null, 'backfills through the day; fetched ' + ctClock(p.as_of_ct))) : null)),
     contactsLine(p),
     h('p', { class: 'sub faint' }, 'Any window that reaches before a source starts shows "no data", never 0. Every view defaults to a date range, never all time.'));
 }
@@ -245,6 +247,17 @@ function speedHealth(p) {
     ]));
 }
 
+function costHealth(p) {
+  if (!p.sources.ads) return null;
+  const sp = p.health.spend;
+  if (!sp) return null;
+  return card(defLink('cost-per-booking', 'Spend checks'),
+    kv([
+      ['Daily Report rows', `${fmtInt(sp.rows)} read · ${fmtInt(sp.dup_dates)} dates listed twice (summed) · ${fmtInt(sp.unreadable)} with a spend cell that isn't a number · ${fmtInt(sp.blank)} with no spend yet`],
+      ['Read from it', 'Date, Ad Spend and RetireWell Spend (columns A, G and K). No other tab of the lead router is opened.']
+    ]));
+}
+
 // ---------------------------------------------------------------- security and known gaps
 
 function security() {
@@ -255,7 +268,7 @@ function security() {
     kv([
       ['Answered', 'Collected by the dialer but not shown anywhere: it counts pickups by a person or a voicemail, which the phone system can’t tell apart, so it has no usable definition yet.'],
       ['Other targets in the sheets', `The KPI sheet's own Goals & Definitions tab lists a 150 dials/day minimum, a 75% show-rate goal and weekly booked goals. They are not used here: the only dial target is ${DIAL_TARGET ?? 'none'} a day, and goals come from the tracker's goals tab.`],
-      ['Not on this dashboard', 'Pay, commission and payroll; prospect names, contact details, notes and CRM links; closes and closed assets; ad spend and campaign attribution (that is the Ads Center).']
+      ['Not on this dashboard', 'Pay, commission and payroll; prospect names, contact details, notes and CRM links; closes and closed assets; spend by campaign or ad set, and campaign attribution (that is the Ads Center).']
     ]),
     h('p', { class: 'sub' }, h('a', { href: '?selftest=1' }, 'Open the self-test'), ' to re-run every acceptance check against the live data.'));
 }
@@ -270,6 +283,7 @@ export const GLOSSARY = [
   ['dial-target', 'Dial target', `${DIAL_TARGET ?? 'No'} dials per setter per day: the dotted tick on dial bars. The team pace bar fills toward that × the live (non-onboarding) setters who have dial coverage. There is no separate team target.`],
   ['talk', 'Talk time and seconds per dial', 'Summed from the dialer’s Talk Seconds and formatted once at the end. Seconds per dial = talk seconds ÷ dials. The sheet’s own Talk Time text column is never added up.'],
   ['contacts-60', 'Contacts and contact rate', 'Dialer calls that were picked up and lasted 61 seconds or longer, from the dialer feed’s Calls Over 60s column, counted by the dialer’s date and refreshed every 5 minutes (today’s number grows during the day). A voicemail that ran past 60 seconds counts too: the phone system can’t tell a person from a voicemail. Contact rate = contacts ÷ dials. Filled back to 2026-07-14.'],
+  ['contact-to-booking', 'Contact to booking', 'Booked ÷ contacts over the same window: appointments by Date Booked ÷ dialer calls over 60 seconds by the dialer’s date. Both are system counts, never the EOD’s self-reported contacts. It isn’t a strict conversion: a booking can come from a text or a short call, and voicemails over 60 seconds count as contacts, so a small window can read high.'],
   ['answered', 'Answered (not shown)', 'The dialer’s own footnote: Answered is “the number picked up — a person OR a voicemail; the phone system cannot tell them apart.” Collected, not shown, pending a definition.'],
   ['new-leads', 'New leads', 'Leads from the routing sheet’s Daily tab, counted on the lead’s own date and credited to the setter the router assigned it to (the Setter column, whether by rotation or by hand). That never changes when someone else picks the lead up. Leads left in House (unassigned) or another queue count in the team total but against no one. The routing sheet stamps its own refresh time, shown at the top of the page.'],
   ['booked', 'Booked', 'Appointment rows counted by Date Booked. Credit lands on the day the booking was made: a booking made on the 30th for a meeting on the 5th belongs to the 30th. Today’s figure is always “entered so far”: the tracker often trails the floor.'],
@@ -293,7 +307,8 @@ export const GLOSSARY = [
   ['ramping', 'Part-time / ramping', 'Anyone with fewer than 5 active dialing days in the month: listed with their numbers, not ranked.'],
   ['roster', 'Roster, departed and not on the roster', 'The live roster is Max’s list. Departed setters are collapsed into one “departed (n)” line and never named; their numbers still count in the raw-scan totals. Names on neither list stay as their own flagged rows until resolved.'],
   ['team-totals', 'Roster-joined vs raw scan', 'Every team total exists both ways: live roster only, and every row in the data. The difference (departed plus not-on-roster names) is shown on this page.'],
-  ['client-mix', 'RetireWell + Funnel client, mixed', 'Appointments from RetireWell ads and from a separate Funnel client share the tracker with no column telling them apart, so every appointment figure includes both.']
+  ['client-mix', 'RetireWell + Funnel client, mixed', 'Appointments from RetireWell ads and from a separate Funnel client share the tracker with no column telling them apart, so every appointment figure includes both.'],
+  ['cost-per-booking', 'Cost per booking (RW and total)', 'RW = RetireWell Spend ÷ all setter bookings. Total = (Ad Spend + RetireWell Spend) ÷ all setter bookings. Spend is the lead router’s Daily Report, one row per ad-account (Eastern) day; its Ad Spend column is every other client’s spend, and the two add up to its Ad Spend Daily total. Bookings are every tracker row by Date Booked, the same count as Booked, whichever client the booking was for, so neither figure is the Command Center’s RW-only cost per booking. Today is always so far.']
 ];
 
 /** The sheet's own wording, from the KPI sheet's Goals & Definitions tab. */

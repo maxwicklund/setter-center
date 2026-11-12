@@ -1,5 +1,5 @@
 import { h, s } from '../dom.js';
-import { DEPARTED_KEY, WINDOWS, MAX_CUSTOM_DAYS, fmtInt, fmtDuration, bySetter, dayLabel, addDays, dateRange, resolveWindow, percentile, hasContacts, fmtPct1 } from '../data.js';
+import { DEPARTED_KEY, WINDOWS, MAX_CUSTOM_DAYS, fmtInt, fmtDuration, bySetter, dayLabel, addDays, dateRange, resolveWindow, percentile, hasContacts, fmtPct1, contactToBooking } from '../data.js';
 import { tag, segmented, customRange, defLink } from '../ui.js';
 
 // Tab 2, Dials & Activity: setters x days, one cell per day, on one sequential ramp
@@ -92,8 +92,8 @@ function content(p, ix, draw) {
     const contacts = rows.reduce((t, r) => t + (r.contacts || 0), 0);
     return M.of({ dials, talk_seconds: talk, contacts });
   });
-  const teamTotals = withCoverage.reduce((t, r) => ({ dials: t.dials + r.dials, talk: t.talk + r.talk, contacts: t.contacts + r.contacts, active: t.active + r.active }),
-    { dials: 0, talk: 0, contacts: 0, active: 0 });
+  const teamTotals = withCoverage.reduce((t, r) => ({ dials: t.dials + r.dials, talk: t.talk + r.talk, contacts: t.contacts + r.contacts, active: t.active + r.active, booked: t.booked + r.booked }),
+    { dials: 0, talk: 0, contacts: 0, active: 0, booked: 0 });
 
   const controls = h('div', { class: 'controls' },
     segmented('Window', WINDOWS, view.window, v => { view.window = v; draw(); }),
@@ -113,17 +113,19 @@ function content(p, ix, draw) {
         h('p', { class: 'sub' }, `${dayLabel(win.from)} – ${dayLabel(win.to)} · ${win.days} days · by dialer date · booked by Date Booked`),
         h('p', { class: 'sub' }, `Everyone on the dialer: ${fmtInt(teamTotals.dials)} dials on ${fmtInt(teamTotals.active)} active setter-days ` +
           `(${teamTotals.active ? fmtInt(teamTotals.dials / teamTotals.active) : '—'} per active day)` +
-          (contactsOk ? ` · ${fmtInt(teamTotals.contacts)} contacts (${teamTotals.dials ? fmtPct1(teamTotals.contacts / teamTotals.dials) : '—'} of dials)` : '') +
+          (contactsOk ? ` · ${fmtInt(teamTotals.contacts)} contacts (${teamTotals.dials ? fmtPct1(teamTotals.contacts / teamTotals.dials) : '—'} of dials)` +
+            ` · ${fmtInt(teamTotals.booked)} booked, ${contactToBooking(teamTotals.booked, teamTotals.contacts)} contact to booking` : '') +
           ` · ${fmtDuration(teamTotals.talk)} talk` +
           (teamTotals.dials ? ` · ${Math.round(teamTotals.talk / teamTotals.dials)}s per dial` : '')),
         notes.map(n => h('p', { class: 'sub faint' }, n))),
       h('div', { class: 'heat-scroll' },
-        heatTable(dates, p.today_ct, withCoverage, noCoverage, team, M, step, ix)),
+        heatTable(dates, p.today_ct, withCoverage, noCoverage, team, M, step, ix, contactsOk)),
       legend(M.cell(top))),
     h('p', { class: 'sub faint' }, defLink('active-day', 'Active day'),
       ' = a day with dials > 0; per-day averages divide by active days, not calendar days. The dialer stores a row for every rostered setter every day, ' +
       "including days before they started, so a 0 doesn't prove anyone was working.",
-      contactsOk ? [' ', defLink('contacts-60', 'Contacts'), ' = dialer calls over 60 seconds (voicemails that long included); contact rate = contacts ÷ dials.'] : null),
+      contactsOk ? [' ', defLink('contacts-60', 'Contacts'), ' = dialer calls over 60 seconds (voicemails that long included); contact rate = contacts ÷ dials; ',
+        defLink('contact-to-booking', 'contact to booking'), ' = booked ÷ contacts.'] : null),
     leadsCard(p, ix, win)
   ];
 
@@ -136,7 +138,8 @@ function content(p, ix, draw) {
   }
 }
 
-function heatTable(dates, today, rows, noCoverage, team, M, step, ix) {
+function heatTable(dates, today, rows, noCoverage, team, M, step, ix, contactsOk) {
+  const extra = contactsOk ? 1 : 0;
   const teamTop = Math.max(...team.filter(v => v != null), 1);
   const head = h('tr', null,
     h('th', { scope: 'col', class: 'who sticky' }, 'Setter'),
@@ -145,6 +148,7 @@ function heatTable(dates, today, rows, noCoverage, team, M, step, ix) {
     h('th', { scope: 'col', class: 'num' }, 'Active days'),
     h('th', { scope: 'col', class: 'num' }, 'Per active day'),
     h('th', { scope: 'col', class: 'num' }, 'Booked'),
+    contactsOk ? h('th', { scope: 'col', class: 'num', title: 'Booked ÷ contacts (calls over 60s)' }, 'Contact → booking') : null,
     h('th', { scope: 'col', class: 'trend' }, '30-day trend'));
 
   const body = rows.map(r => h('tr', null,
@@ -154,16 +158,18 @@ function heatTable(dates, today, rows, noCoverage, team, M, step, ix) {
     h('td', { class: 'num' }, fmtInt(r.active)),
     h('td', { class: 'num' }, perActiveDay(r)),
     h('td', { class: 'num' }, fmtInt(r.booked)),
+    contactsOk ? h('td', { class: 'num', title: `${ix.label(r.setter)}: ${fmtInt(r.booked)} booked ÷ ${fmtInt(r.contacts)} contacts` }, contactToBooking(r.booked, r.contacts)) : null,
     h('td', { class: 'trend' }, sparkline(r.trend, M))));
 
   const uncovered = noCoverage.length ? [
-    h('tr', { class: 'heat-divider' }, h('th', { scope: 'rowgroup', colspan: dates.length + 6 }, h('span', { class: 'sticky-label' },
+    h('tr', { class: 'heat-divider' }, h('th', { scope: 'rowgroup', colspan: dates.length + 6 + extra }, h('span', { class: 'sticky-label' },
       `No dial coverage (${noCoverage.length}): the dialer stores no rows for these names, so every day is "no data", not 0`))),
     ...noCoverage.map(r => h('tr', { class: 'is-uncovered' },
       h('th', { scope: 'row', class: 'who sticky' }, ix.label(r.setter), tag(ix.status(r.setter))),
       dates.map(d => noDataCell(d, ix.label(r.setter))),
       h('td', { class: 'faint uncovered-note', colspan: 3 }, 'no dial coverage'),
       h('td', { class: 'num' }, fmtInt(r.booked)),
+      contactsOk ? h('td', { class: 'num faint' }, '—') : null,
       h('td', { class: 'trend' })))
   ] : [];
 
@@ -176,7 +182,7 @@ function heatTable(dates, today, rows, noCoverage, team, M, step, ix) {
       return h('td', { class: 'col-cell', title: `${dayLabel(dates[i])}: ${M.long(v)}` },
         h('span', { class: 'col-val' }, compact(v, M)), h('div', { class: 'col-track' }, bar));
     }),
-    h('td', { colspan: 5 }));
+    h('td', { colspan: 5 + extra }));
 
   return h('table', { class: 'heat' },
     h('thead', null, head),

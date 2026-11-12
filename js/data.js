@@ -100,12 +100,40 @@ export const fmtPct1 = v => (v == null ? '—' : `${(100 * v).toFixed(1)}%`);
 /** Contacts ÷ dials, or '—' with no dials. */
 export const contactRate = (contacts, dials) => (dials ? fmtPct1(contacts / dials) : '—');
 
+/** Booked ÷ contacts (dialer calls over 60s), or '—' with no contacts. */
+export const contactToBooking = (booked, contacts) => (contacts ? fmtPct1(booked / contacts) : '—');
+
 /** Talk seconds -> '8m' / '4h 49m', formatted once, after summing. */
 export function fmtDuration(seconds) {
   if (seconds == null) return '—';
   const mins = Math.round(seconds / 60);
   const hrs = Math.floor(mins / 60);
   return hrs ? `${hrs}h ${String(mins % 60).padStart(2, '0')}m` : `${mins}m`;
+}
+
+/** Dollars, whole, formatted once after summing: '$312', '$12,345'. */
+export const fmtMoney = n => (n == null ? '—' : `$${Math.round(n).toLocaleString('en-US')}`);
+
+/** The Monday on or before ymd: weeks run Monday to Sunday. */
+export function mondayOf(ymd) {
+  return addDays(ymd, -((new Date(ymd + 'T00:00:00Z').getUTCDay() + 6) % 7));
+}
+
+/** Spend arrives from sheet D (the lead router); an endpoint older than 2026-11-12 sends none. */
+export const hasSpend = p => Boolean(p.sources.ads && p.sources.ads.ok && Array.isArray(p.spend_daily));
+
+/**
+ * Spend and bookings over from..to, inclusive. Spend is by the Daily Report's day; bookings are
+ * every setter booking by Date Booked (the same count as Booked everywhere else), for both costs.
+ * A cost with nothing to divide by is null.
+ */
+export function costPerBooking(p, from, to) {
+  const spend = p.spend_daily.filter(r => r.date >= from && r.date <= to);
+  const rwSpend = sum(spend, 'rw_spend');
+  const totalSpend = sum(spend, 'total_spend');
+  const booked = sum(p.booked.filter(r => r.date_booked >= from && r.date_booked <= to), 'booked');
+  const per = v => (spend.length && booked ? v / booked : null);
+  return { days: daysBetween(from, to) + 1, spendDays: spend.length, rwSpend, totalSpend, booked, rwCost: per(rwSpend), totalCost: per(totalSpend) };
 }
 
 /** Sums one field per setter: Map(setter -> total). */

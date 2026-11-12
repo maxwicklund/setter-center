@@ -8,7 +8,8 @@ var CONFIG = {
   IDS: {
     kpi:     'FAKE-KPI-SPREADSHEET-ID-0000000000000000000',
     tracker: 'FAKE-TRACKER-SPREADSHEET-ID-00000000000000',
-    router:  'FAKE-ROUTER-SPREADSHEET-ID-000000000000000'
+    router:  'FAKE-ROUTER-SPREADSHEET-ID-000000000000000',
+    ads:     'FAKE-ADS-SPREADSHEET-ID-0000000000000000000'
   },
   LIVE: ['Ava Testwell', 'Ben Sampleton', 'Cal Dummond', 'Dot Nodata', 'Eli Rotary'],
   ONBOARDING: ['Cal Dummond', 'Dot Nodata'],

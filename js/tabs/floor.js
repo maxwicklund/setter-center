@@ -1,6 +1,7 @@
 import { h } from '../dom.js';
 import { DEPARTED_KEY, fmtInt, fmtDuration, bySetter, dayLabel, hasContacts, contactRate } from '../data.js';
 import { tag, defLink } from '../ui.js';
+import { costTile } from '../cost.js';
 import { DIAL_TARGET } from '../../config.js';
 
 // Tab 1, Floor: today only, everyone, no filters. "Today" is the server's CT date.
@@ -67,7 +68,8 @@ export function renderFloor(p, ix) {
         [`${fmtInt(setterLeads)} to setters`, ...queueLeads.map(r => `${fmtInt(r.leads)} in ${r.queue}`)].join(' · '), leadsOk),
       tile(defLink('booked', 'Appointments entered today'), apptsOk ? fmtInt(bookedTotal) : '—', 'by Date Booked · entered so far', apptsOk),
       tile(defLink('qualified-show', 'Qualified shows today'), apptsOk ? fmtInt(qualifiedShows) : '—', 'by Appointment Date · Showed + Qualified', apptsOk),
-      tile(defLink('pending', "Pending on today's calendar"), apptsOk ? fmtInt(pendingToday) : '—', 'by Appointment Date · no outcome yet', apptsOk)),
+      tile(defLink('pending', "Pending on today's calendar"), apptsOk ? fmtInt(pendingToday) : '—', 'by Appointment Date · no outcome yet', apptsOk),
+      costTile(p)),
     setterTable(rows, ix, scaleMax, today, apptsOk, contactsOk, leadsOk, eodSent.size),
     strip(noCoverage, offRoster, booked, dialRows, leads, ix));
 }

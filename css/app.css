@@ -234,10 +234,18 @@ a { color: var(--accent); }
 .meter-fill { height: 100%; background: var(--accent); border-radius: 0 4px 4px 0; }
 .meter-tick { position: absolute; top: 0; bottom: 0; border-left: 2px dotted var(--bg); }
 
-.tiles { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 12px; }
 .tile { gap: 4px; padding: 14px 16px; }
 .tile-value { font-size: clamp(28px, 3vw, 40px); font-weight: 650; line-height: 1.1; }
 .tile.is-unavailable .tile-value { color: var(--text-3); }
+.tile-value-pair { display: grid; font-size: clamp(22px, 2vw, 28px); }
+.tile-value-pair .unit { margin-left: 2px; }
+
+.cost-card { gap: 12px; }
+.cost-card .table-scroll { overflow-x: auto; max-width: 100%; }
+.cost-weeks th, .cost-weeks td { white-space: nowrap; }
+.cost-weeks .strong { font-weight: 650; }
+.cost-weeks tr.is-partial > * { color: var(--text-2); }
 
 .floor-table-card { gap: 12px; }
 .floor-table { width: 100%; border-collapse: collapse; }
@@ -432,6 +440,7 @@ a { color: var(--accent); }
 .tile-pair, .figures, .goal-pair, .speed-head { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .tile-trio { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
 .mini-tile { display: grid; gap: 3px; align-content: start; background: var(--surface-2); border-radius: 6px; padding: 12px 14px; }
+.figures-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .figure { display: grid; gap: 2px; }
 .figure-value { font-size: 24px; font-weight: 650; }
 .tile-value.is-empty { font-size: 24px; color: var(--text-3); }

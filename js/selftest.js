@@ -27,7 +27,8 @@ const ARRAYS = {
   first_touch_queues: [['date', 'queue'], FT_FIELDS],
   speed_buckets: [['bucket', 'routed_by'], ['leads', 'booked']],
   speed_window: [['who', 'by', 'routed_by'], ['kind', 'leads', 'touched', 'within_1h', 'booked', 'median_min']],
-  unworked_age: [['age', 'routed_by'], ['leads']]
+  unworked_age: [['age', 'routed_by'], ['leads']],
+  spend_daily: [['date'], ['rw_spend', 'total_spend']]
 };
 const SCALARS = ['version', 'as_of_ct', 'today_ct', 'client_mix', 'sources', 'coverage', 'health', 'speed_window_median_min'];
 
@@ -40,7 +41,7 @@ export async function runChecks({ payload: p, text }) {
   const ix = rosterIndex(p);
 
   // Sources
-  const sheetNames = { kpi: 'Sheet A (KPI dashboard)', tracker: 'Sheet B (appointment tracker)', router: 'Sheet C (setter routing)' };
+  const sheetNames = { kpi: 'Sheet A (KPI dashboard)', tracker: 'Sheet B (appointment tracker)', router: 'Sheet C (setter routing)', ads: 'Sheet D (lead router: ad spend)' };
   for (const [key, label] of Object.entries(sheetNames)) {
     const src = p.sources[key] || {};
     add('Sources', `${label} read`, src.ok ? 'read' : 'failed', 'read', src.ok ? 'pass' : 'fail',

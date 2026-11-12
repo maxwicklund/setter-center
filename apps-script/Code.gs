@@ -20,7 +20,7 @@
  * Nothing in this file writes to a sheet.
  */
 
-const VERSION = '2026-11-05.1';
+const VERSION = '2026-11-12.2';
 const CACHE_PREFIX = 'payload:' + VERSION + ':';
 const CACHE_TTL_S = 180;
 const CACHE_CHUNK_CHARS = 90000; // CacheService rejects a value over 100KB
@@ -46,9 +46,12 @@ const ALLOW = {
                          "Other setters' leads", 'By call', 'By text', 'Within 1h',
                          'Median minutes to touch', 'Booked'],
   'Leads':              ['Came in', 'Date', 'Setter', 'Routed by', 'Routed at', 'Touched', 'First touch',
-                         'First touch type', 'First touch by', 'Minutes to first touch', 'Booked']
+                         'First touch type', 'First touch by', 'Minutes to first touch', 'Booked'],
                          // = columns B-K + O exactly. Used only to compute speed aggregates;
                          // no Leads row ever enters the payload.
+  // Sheet D, the lead router (NEW LEADS SYSTEM): A, G and K of Daily Report only. No other tab
+  // on it is opened; Client Data and Booked Appointments hold lead names.
+  'Daily Report':       ['Date', 'Ad Spend', 'RetireWell Spend']
 };
 
 // Values that sit in a person column but are not people (trap 4). 'All' is the
@@ -123,6 +126,7 @@ function selfCheck() {
   console.log(JSON.stringify({
     sources: p.sources, today_ct: p.today_ct, last_row: p.health.last_row, data_rows: p.health.data_rows,
     a_vs_b_appt_rows: [p.health.a_appt_rows, p.health.b_appt_rows], distinct_names: p.health.distinct_names,
+    spend_days: p.spend_daily.length,
     payload_kb: Math.round(JSON.stringify(p).length / 1024), payload_guard: hits.length ? hits : 'ok'
   }, null, 1));
 }
@@ -236,15 +240,16 @@ function guardPayload_(json, cfg) {
 
 // ---------------------------------------------------------------- reading
 
-const READERS = { kpi: readKpi_, tracker: readTracker_, router: readRouter_ };
+const READERS = { kpi: readKpi_, tracker: readTracker_, router: readRouter_, ads: readAds_ };
 
 /** Opens each spreadsheet separately so one lost share greys out its tabs, not the dashboard. */
 function buildPayload_() {
   if (typeof CONFIG === 'undefined' || !CONFIG || !CONFIG.IDS) throw new Error('CONFIG not found: add Config.gs to the Apps Script project');
   const sources = {};
   const raw = {};
-  for (const key of ['kpi', 'tracker', 'router']) {
+  for (const key of ['kpi', 'tracker', 'router', 'ads']) {
     try {
+      if (!CONFIG.IDS[key]) throw new Error('no spreadsheet ID for "' + key + '" in Config.gs');
       raw[key] = READERS[key](SpreadsheetApp.openById(CONFIG.IDS[key]));
       sources[key] = { ok: true, error: null, stamp: null };
     } catch (err) {
@@ -294,6 +299,14 @@ function readRouter_(ss) {
     out.stamps[tab] = ss.getSheetByName(tab).getRange('A1').getNote();
   }
   return out;
+}
+
+function readAds_(ss) {
+  return {
+    // A, G and K only: the day (an Eastern day, the ad account's), every other client's spend,
+    // and RetireWell's. G + K is the account's total: it matches the sheet's own Ad Spend Daily.
+    spend: readTab_(ss, 'Daily Report', 1, [[1, 1], [7, 1], [11, 1]], ALLOW['Daily Report'])
+  };
 }
 
 /**
@@ -382,7 +395,7 @@ function aggregate_(raw, cfg, nowMs, sources) {
     eod_test_row: null, eod_multi_submissions: 0,
     goals: null,
     all_rows_filtered: { daily: 0, first_touch: 0 }, median_collisions: 0,
-    router_all: null, router_recon: null, leads_values: null,
+    router_all: null, router_recon: null, leads_values: null, spend: null,
     speed_unusable: { touched_no_time: 0, untouched_no_age: 0 },
     roster_total: {}, rawscan_total: {}
   };
@@ -396,6 +409,7 @@ function aggregate_(raw, cfg, nowMs, sources) {
     dials: [], booked: [], outcomes: [], pending: [], cohort: [], eod: [], goals: [], roster: [],
     speed_daily: [], speed_daily_queues: [], first_touch: [], first_touch_queues: [],
     speed_buckets: [], speed_window: [], unworked_age: [], speed_window_median_min: null,
+    spend_daily: [],
     health: h
   };
 
@@ -406,6 +420,10 @@ function aggregate_(raw, cfg, nowMs, sources) {
     h.a_appt_rows = raw.kpi.a_appts.data_rows;
     dialsPart_(raw.kpi.dials, names, h, out);
     eodPart_(raw.kpi.eod, cfg, names, h, out);
+  }
+  if (raw.ads) {
+    noteTable_(h, 'spend', raw.ads.spend);
+    spendPart_(raw.ads.spend, h, out);
   }
   if (raw.tracker) {
     noteTable_(h, 'tracker', raw.tracker.appts);
@@ -431,7 +449,8 @@ function aggregate_(raw, cfg, nowMs, sources) {
     daily_from: minOf_(out.speed_daily.concat(out.speed_daily_queues), 'date'),
     daily_to: maxOf_(out.speed_daily.concat(out.speed_daily_queues), 'date'),
     leads_from: h.router_recon ? h.router_recon.leads_from : null,
-    leads_to: h.router_recon ? h.router_recon.leads_to : null
+    leads_to: h.router_recon ? h.router_recon.leads_to : null,
+    spend_from: minOf_(out.spend_daily, 'date'), spend_to: maxOf_(out.spend_daily, 'date')
   };
   return out;
 }
@@ -596,6 +615,32 @@ function apptPart_(t, names, today, h, out) {
   out.cohort = Array.from(cohort.values());
   h.status_inventory = inventory_(statusInv, 'status');
   h.tz_counts = inventory_(tzInv, 'tz');
+}
+
+/**
+ * Daily Report -> spend_daily [{date, rw_spend, total_spend}], dollars to the cent.
+ * total_spend = Ad Spend (G, every other client) + RetireWell Spend (K). A dated row with
+ * both cells blank is no data, never $0.
+ */
+function spendPart_(t, h, out) {
+  const acc = new Map();
+  const s = { rows: t.data_rows, blank: 0, unreadable: 0, dup_dates: 0 };
+  for (const r of t.rows) {
+    const date = dayOf_(t, r, 'Date', 'iso', h);
+    if (!date) continue;
+    const other = money_(r['Ad Spend']);
+    const rw = money_(r['RetireWell Spend']);
+    if (other === null && rw === null) { s.blank++; continue; }
+    if (Number.isNaN(other) || Number.isNaN(rw)) { s.unreadable++; continue; }
+    const d = acc.get(date);
+    if (d) s.dup_dates++; // summed, and counted on Data Health
+    const rec = d || { date: date, rw_spend: 0, total_spend: 0 };
+    rec.rw_spend = cents_(rec.rw_spend + (rw || 0));
+    rec.total_spend = cents_(rec.total_spend + (rw || 0) + (other || 0));
+    acc.set(date, rec);
+  }
+  out.spend_daily = Array.from(acc.values()).sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+  h.spend = s;
 }
 
 function goalsPart_(t, cfg, names, h, out) {
@@ -884,7 +929,7 @@ function nameBook_(cfg) {
 const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
 
 /**
- * One parser for every date shape in the three sheets:
+ * One parser for every date shape in the sheets:
  *   iso          2026-07-14                (_Dials)
  *   iso_weekday  2026-11-02 (Mon)          (sheet C)
  *   mon_d_y      Nov 2, 2026               (tracker)
@@ -1006,6 +1051,18 @@ function statusKind_(s) {
 function yes_(v) { return /^(yes|y|true)$/i.test(String(v || '').trim()); }
 
 function normName_(v) { return String(v || '').replace(/\s+/g, ' ').trim(); }
+
+/** '$3,494.99' -> 3494.99; blank -> null; anything else unreadable -> NaN. */
+function money_(v) {
+  let s = String(v == null ? '' : v).replace(/[$,\s]/g, '');
+  if (!s) return null;
+  const neg = /^\(.*\)$/.test(s);
+  if (neg) s = s.slice(1, -1);
+  const n = Number(s);
+  return isFinite(n) ? (neg ? -n : n) : NaN;
+}
+
+function cents_(n) { return Math.round(n * 100) / 100; }
 
 function int_(v) {
   const n = parseInt(String(v || '').replace(/[,\s]/g, ''), 10);

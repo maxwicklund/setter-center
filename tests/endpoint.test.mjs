@@ -72,7 +72,7 @@ test('authorized payload: aggregates only, and nothing forbidden is read or ship
   // Read: only the allowed columns and rows, values via getDisplayValues, A1 of Leads as a note only.
   const allowedCols = {
     '_Dials': [1, 2, 3, 5, 7], '_EOD': [3, 4, 5, 6, 7, 8, 9, 10, 12, 14], '_Appointments': [1],
-    'Appointment Tracker': [1, 2, 5, 7, 8, 10, 13, 15], 'Goals & Payroll': [1, 2, 3, 5],
+    'Appointment Tracker': [1, 2, 5, 7, 8, 10, 13, 15], 'Goals & Payroll': [1, 2, 3, 5], 'Daily Report': [1, 7, 11],
     'Daily': [1, 2, 3, 4, 5, 6, 7, 8, 9], 'First touch by': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
     'Leads': [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15]
   };
@@ -88,9 +88,34 @@ test('authorized payload: aggregates only, and nothing forbidden is read or ship
     }
   }
   // Every array is a count keyed by date and/or setter: no row-level record shape.
-  for (const k of ['dials', 'booked', 'outcomes', 'pending', 'cohort', 'eod', 'speed_daily', 'first_touch', 'speed_buckets', 'speed_window', 'unworked_age']) {
+  for (const k of ['dials', 'booked', 'outcomes', 'pending', 'cohort', 'eod', 'speed_daily', 'first_touch', 'speed_buckets', 'speed_window', 'unworked_age', 'spend_daily']) {
     for (const r of p[k]) for (const v of Object.values(r)) assert.ok(v == null || typeof v === 'number' || typeof v === 'string', k);
   }
+});
+
+test('spend: by day from the Daily Report, other clients plus RetireWell, to the cent', () => {
+  const { ctx } = makeContext({ spreadsheets: fakeWorld() });
+  const p = post(ctx, { token: TOKEN });
+  assert.equal(p.sources.ads.ok, true, p.sources.ads.error);
+  assert.deepEqual(p.spend_daily, [
+    { date: '2026-10-30', rw_spend: 2000.5, total_spend: 3000.5 },
+    { date: '2026-10-31', rw_spend: 1500, total_spend: 2000 },
+    { date: '2026-11-01', rw_spend: 225.25, total_spend: 375.25 }]);
+  assert.deepEqual(p.health.spend, { rows: 6, blank: 1, unreadable: 1, dup_dates: 1 });
+  assert.equal(p.coverage.spend_from, '2026-10-30');
+  assert.equal(p.coverage.spend_to, '2026-11-01');
+  assert.ok(p.booked.every(r => Object.keys(r).join() === 'date_booked,setter,booked'));
+});
+
+test('a Config.gs pasted before sheet D existed: no spend, everything else loads', () => {
+  const { ctx } = makeContext({ spreadsheets: fakeWorld() });
+  vm.runInContext('delete CONFIG.IDS.ads;', ctx);
+  const old = post(ctx, { token: TOKEN });
+  assert.equal(old.sources.ads.ok, false);
+  assert.match(old.sources.ads.error, /Config\.gs/);
+  assert.equal(old.sources.tracker.ok, true);
+  assert.deepEqual(old.spend_daily, []);
+  assert.equal(old.health.spend, null);
 });
 
 test('today is the server CT date; DST and year-less clocks parse right', () => {

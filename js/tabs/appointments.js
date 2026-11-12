@@ -1,6 +1,7 @@
 import { h } from '../dom.js';
 import { WINDOWS, fmtInt, bySetter, dayLabel, addDays, resolveWindow } from '../data.js';
 import { tag, segmented, customRange, defLink } from '../ui.js';
+import { costCard } from '../cost.js';
 
 // Tab 3, Appointments & Show Quality. Two panels that must never be read as one table:
 // Booked is counted by Date Booked, outcomes by Appointment Date. Same rows, different
@@ -13,7 +14,8 @@ const view = { window: '30d', from: null, to: null };
 
 export function renderAppointments(p, ix) {
   const root = h('div', { class: 'appts-tab' });
-  const draw = () => root.replaceChildren(...content(p, ix, draw));
+  // replaceChildren would print a skipped (null) panel as the text "null".
+  const draw = () => root.replaceChildren(...content(p, ix, draw).filter(Boolean));
   draw();
   return root;
 }
@@ -67,6 +69,7 @@ function content(p, ix, draw) {
     maturity < MATURE ? h('div', { class: 'banner banner-warn', role: 'status' },
       `This window is ${pct(maturity)} resolved: ${fmtInt(team.pendingDue)} appointments dated before today still have no outcome. ` +
       'Show rates will move as those land, and a fresh window reads low until they do. ', defLink('maturity', 'About maturity')) : null,
+    costCard(p, win, windowText),
     h('div', { class: 'split' },
       bookedPanel(bookedRows, bookedTotal, p, ix, windowText),
       h('div', { class: 'split-divider', role: 'separator', 'aria-orientation': 'vertical' }),

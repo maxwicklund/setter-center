@@ -27,7 +27,7 @@ const currentTab = () => {
 };
 const hashAnchor = () => location.hash.split(':')[1] || null;
 const THEME_KEY = 'rwsc.theme';
-const SHEET_LABELS = { kpi: 'Sheet A (KPI dashboard)', tracker: 'Sheet B (appointment tracker)', router: 'Sheet C (setter routing)' };
+const SHEET_LABELS = { kpi: 'Sheet A (KPI dashboard)', tracker: 'Sheet B (appointment tracker)', router: 'Sheet C (setter routing)', ads: 'Sheet D (lead router: ad spend)' };
 
 const root = document.getElementById('app');
 const state = { payload: null, text: '', error: null, busy: false, poller: null, checks: null };

@@ -6,7 +6,7 @@ A live, password-protected dashboard for the appointment-setting floor. Seven ta
 
 ```
 Google Sheets (private)  →  Apps Script web app (/exec)  →  this static page (GitHub Pages)
-   three spreadsheets          runs as the owner, checks          ships with zero data; asks for
+   four spreadsheets           runs as the owner, checks          ships with zero data; asks for
    nobody else can open        the team password, returns         the team password, then fetches
                                counts only                        the counts and draws everything
 ```
@@ -29,7 +29,7 @@ Google Sheets (private)  →  Apps Script web app (/exec)  →  this static page
 
 ## Setup checklist
 
-1. **Apps Script project.** script.google.com → New project, signed in with the account that can open all three sheets. Paste `apps-script/Config.gs` and `apps-script/Code.gs` (one file or two; both work). Run `selfCheck` once to authorize and check the reads. *`Config.gs` is private: never commit it.*
+1. **Apps Script project.** script.google.com → New project, signed in with the account that can open all four sheets. Paste `apps-script/Config.gs` and `apps-script/Code.gs` (one file or two; both work). Run `selfCheck` once to authorize and check the reads. *`Config.gs` is private: never commit it.*
 2. **Team password.** Run `openssl rand -base64 32` in your own Terminal. In Apps Script: Project Settings → Script Properties → add `DASH_TOKEN` = that value. *Secret: never commit it, never paste it into a chat.*
 3. **Deploy.** Deploy → New deployment → Web app. Execute as **Me**. Who has access **Anyone** (not "Anyone with Google Account"). Copy the URL ending in `/exec`. *Not secret: it sits in `config.js` for anyone to read.* Opening it in a browser shows `{"ok":true,…,"configured":true}`.
 4. **GitHub.** This repo, public, with GitHub Pages serving the `main` branch root.
