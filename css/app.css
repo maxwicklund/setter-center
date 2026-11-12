@@ -222,14 +222,6 @@ a { color: var(--accent); }
 
 /* tab 1: Floor. Sized to read from across the room. */
 .floor { display: grid; gap: 16px; }
-.floor-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 16px; }
-.hero { align-content: start; }
-.hero-value { font-size: clamp(56px, 7vw, 88px); font-weight: 650; line-height: 1; letter-spacing: -0.02em; margin: 6px 0 4px; }
-.hero-value.is-empty { font-size: 32px; color: var(--text-3); font-weight: 500; }
-.pace { align-content: start; }
-.pace-value { font-size: 36px; font-weight: 650; line-height: 1.1; margin-top: 6px; }
-.pace-value .of { color: var(--text-2); font-weight: 500; font-size: 24px; }
-.pace-value .pct { color: var(--text-2); font-weight: 500; font-size: 20px; margin-left: 6px; }
 .meter { position: relative; height: 18px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
 .meter-fill { height: 100%; background: var(--accent); border-radius: 0 4px 4px 0; }
 .meter-tick { position: absolute; top: 0; bottom: 0; border-left: 2px dotted var(--bg); }
@@ -238,7 +230,15 @@ a { color: var(--accent); }
 .tile { gap: 4px; padding: 14px 16px; }
 .tile-value { font-size: clamp(28px, 3vw, 40px); font-weight: 650; line-height: 1.1; }
 .tile.is-unavailable .tile-value { color: var(--text-3); }
-.tile-value-pair { display: grid; font-size: clamp(22px, 2vw, 28px); }
+.tile-value-pair { display: grid; font-size: clamp(24px, 2.4vw, 32px); }
+.tile-pace { display: grid; gap: 4px; }
+.meter.meter-thin { height: 8px; margin: 2px 0 0; }
+
+/* The rest of today in one quiet row, so the four tiles above stay the headline. */
+.stat-strip { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px 20px; padding: 14px 20px; }
+.stat { display: grid; gap: 2px; align-content: start; }
+.stat-value { font-size: 24px; font-weight: 650; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.roster-line { padding: 0 4px; line-height: 1.6; }
 .tile-value-pair .unit { margin-left: 2px; }
 
 .cost-card { gap: 12px; }
@@ -270,9 +270,6 @@ a { color: var(--accent); }
 .state-good { color: var(--good); }
 .state-muted { color: var(--text-3); font-weight: 500; }
 
-.strip { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 12px 4px 0; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-2); }
-.strip > div { display: grid; gap: 4px; align-content: start; }
-.strip ul { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--text); }
 
 /* filters: one row, above the charts */
 .controls { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
@@ -316,24 +313,22 @@ a { color: var(--accent); }
 .s5 { background: color-mix(in oklab, var(--accent) var(--hc-mix-5), var(--surface)); color: var(--hc-ink-5); font-weight: 600; }
 .nodata { background: repeating-linear-gradient(135deg, transparent 0 4px, var(--hatch) 4px 5.5px); }
 
+.card-head-row { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 16px; }
+.board-table .who { font-size: 16px; }
+.board-table .dials { font-size: 19px; }
+.board-table .perday, .board-table .c2b { font-size: 17px; color: var(--text); width: 1%; }
+.board-table .c2b { color: var(--text-2); }
+.board-uncovered td { padding-top: 12px; font-size: 13px; color: var(--text-2); }
+.team-cell { height: 30px; text-align: center; vertical-align: middle; font-size: 12px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; border-top: 1px solid var(--border); }
+.team-cell.is-today { color: var(--accent); }
+.heat-legend-gap { width: 10px; }
+
 .heat-divider th { text-align: left; font-size: 12px; font-weight: 600; color: var(--text-2); padding: 14px 0 4px; }
 .heat .sticky-label { position: sticky; left: 0; display: inline-block; }
-.is-uncovered .who { color: var(--text-2); }
 .heat .is-queue .who { color: var(--text-2); }
-.uncovered-note { font-size: 12px; padding: 0 8px; white-space: nowrap; }
 
 .team-row th, .team-row td { padding-top: 10px; }
-.team-row .who { vertical-align: bottom; }
-.team-sub { display: block; font-size: 11px; font-weight: 400; }
-.col-cell { vertical-align: bottom; text-align: center; }
-.col-val { display: block; font-size: 10px; color: var(--text-2); font-variant-numeric: tabular-nums; margin-bottom: 2px; }
-.col-track { height: 34px; display: flex; align-items: flex-end; justify-content: center; }
-.col-bar { width: 70%; background: var(--info); border-radius: 3px 3px 0 0; }
-
-.spark { display: block; overflow: visible; }
-.spark-line { fill: none; stroke: var(--text-3); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
-.spark-pt { fill: var(--text-3); }
-.spark-now { fill: var(--accent); }
+.team-row .who { vertical-align: middle; }
 
 .heat-legend { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 12px; }
 .heat-legend .key { display: inline-block; width: 22px; height: 16px; min-width: 0; line-height: 16px; font-size: 10px; }
@@ -639,11 +634,12 @@ a { color: var(--accent); }
 
 @media (max-width: 1100px) {
   .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .stat-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-width: 760px) {
-  .floor-top, .strip { grid-template-columns: minmax(0, 1fr); }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 14px 16px; }
   .tiles > .tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .floor-table thead { display: none; }
   .floor-table, .floor-table tbody { display: block; }
@@ -666,6 +662,15 @@ a { color: var(--accent); }
   .floor-table td.talk::before { content: 'Talk '; color: var(--text-3); }
   .floor-table td.leads::before { content: 'Leads '; color: var(--text-3); }
   .floor-table td.booked::before { content: 'Booked '; color: var(--text-3); }
+  .board-table td.perday, .board-table td.c2b { width: auto; }
+  .board-table td.perday { order: 5; font-size: 13px; text-align: left; }
+  .board-table td.contacts { order: 6; }
+  .board-table td.booked { order: 7; }
+  .board-table td.c2b { order: 8; font-size: 13px; text-align: left; }
+  .board-table td.talk { order: 9; }
+  .board-table td.perday::before { content: 'Per day '; color: var(--text-3); }
+  .board-table td.c2b::before { content: 'Contact → booking '; color: var(--text-3); }
+  .board-uncovered td { flex: 1 1 100%; }
 }
 
 @media (max-width: 640px) {

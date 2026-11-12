@@ -9,6 +9,15 @@ export function tag(status) {
   return null;
 }
 
+/** One headline number: label, value, one plain line under it. Greyed with offNote when its source is down. */
+export function tile(label, value, sub, ok, offNote = 'source unavailable', ...extra) {
+  return h('section', { class: 'tile card' + (ok ? '' : ' is-unavailable') },
+    h('p', { class: 'label' }, label),
+    h('p', { class: 'tile-value' }, value),
+    ok ? extra : null,
+    h('p', { class: 'sub' }, ok ? sub : offNote));
+}
+
 /** A metric label that links to its definition on the Data Health tab. */
 export function defLink(key, ...children) {
   return h('a', { class: 'deflink', href: `#health:def-${key}`, title: 'What this means' }, ...children);

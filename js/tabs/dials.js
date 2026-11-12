@@ -1,11 +1,12 @@
-import { h, s } from '../dom.js';
-import { DEPARTED_KEY, WINDOWS, MAX_CUSTOM_DAYS, fmtInt, fmtDuration, bySetter, dayLabel, addDays, dateRange, resolveWindow, percentile, hasContacts, fmtPct1, contactToBooking } from '../data.js';
-import { tag, segmented, customRange, defLink } from '../ui.js';
+import { h } from '../dom.js';
+import { DEPARTED_KEY, WINDOWS, MAX_CUSTOM_DAYS, fmtInt, fmtDuration, bySetter, dayLabel, dateRange, resolveWindow, percentile, hasContacts, fmtPct1, contactRate, contactToBooking, sum } from '../data.js';
+import { tag, segmented, customRange, defLink, tile } from '../ui.js';
 
-// Tab 2, Dials & Activity: setters x days, one cell per day, on one sequential ramp
-// anchored at 0 and the window's 95th percentile. A day the dialer has no row for is
-// hatched "no data", never a 0. Counted by the dialer's date. Below it, the same window
-// for new leads per setter, from the routing sheet's Daily tab by the lead's own date.
+// Tab 2, Dials & Activity, read top to bottom: the window's totals, one row per setter for
+// the window, then the same people day by day. The day grid is one sequential ramp anchored
+// at 0 and the window's 95th percentile; a day the dialer has no row for is hatched "no
+// data", never a 0. Counted by the dialer's date. Last, new leads per setter per day, from
+// the routing sheet's Daily tab by the lead's own date.
 
 const METRICS = {
   dials: { label: 'Dials', of: r => r.dials, cell: v => fmtInt(v), long: v => `${fmtInt(v)} dials` },
@@ -24,7 +25,7 @@ const view = { window: '14d', metric: 'dials', from: null, to: null };
 export function renderDials(p, ix) {
   const root = h('div', { class: 'dials-tab' });
   const draw = () => {
-    root.replaceChildren(...content(p, ix, draw));
+    root.replaceChildren(...content(p, ix, draw).filter(Boolean));
     // On a narrow screen, open on the newest days rather than the oldest.
     requestAnimationFrame(() => {
       for (const box of root.querySelectorAll('.heat-scroll')) if (box.scrollWidth > box.clientWidth) box.scrollLeft = box.scrollWidth;
@@ -35,71 +36,48 @@ export function renderDials(p, ix) {
 }
 
 function content(p, ix, draw) {
+  const win = resolveWindow(view, p.today_ct);
+  const controls = h('div', { class: 'controls' },
+    segmented('Window', WINDOWS, view.window, v => { view.window = v; draw(); }),
+    view.window === 'custom' ? customRange(view, win, p.today_ct, draw) : null,
+    h('span', { class: 'controls-gap' }),
+    h('span', { class: 'sub' }, `${dayLabel(win.from)} – ${dayLabel(win.to)} · ${win.days} days`));
   if (!p.sources.kpi.ok) {
-    const win = resolveWindow(view, p.today_ct);
-    return [
-      h('div', { class: 'controls' },
-        segmented('Window', WINDOWS, view.window, v => { view.window = v; draw(); }),
-        view.window === 'custom' ? customRange(view, win, p.today_ct, draw) : null),
-      h('div', { class: 'banner banner-warn' }, "Sheet A couldn't be read, so there are no dial counts right now. The grid comes back on the next successful refresh."),
+    return [controls,
+      h('div', { class: 'banner banner-warn' }, "Sheet A couldn't be read, so there are no dial counts right now. They come back on the next successful refresh."),
       leadsCard(p, ix, win)];
   }
   const contactsOk = hasContacts(p);
-  const metrics = Object.entries(METRICS).filter(([, m]) => contactsOk || !m.needsContacts);
-  if (!metrics.some(([k]) => k === view.metric)) view.metric = 'dials';
-  const M = METRICS[view.metric];
-  const win = resolveWindow(view, p.today_ct);
   const dates = dateRange(win.from, win.to);
-  const dates30 = dateRange(addDays(p.today_ct, -29), p.today_ct);
   const byKey = new Map(p.dials.map(r => [`${r.setter}|${r.date}`, r]));
   const covered = new Set(p.dials.map(r => r.setter));
-  const booked = bySetter(p.booked.filter(r => r.date_booked >= win.from && r.date_booked <= win.to), 'booked');
+  const inWin = d => d >= win.from && d <= win.to;
+  const booked = bySetter(p.booked.filter(r => inWin(r.date_booked)), 'booked');
 
-  const withCoverage = [...covered].map(setter => {
+  const people = [...covered].map(setter => {
     const days = dates.map(d => byKey.get(`${setter}|${d}`) || null);
     const present = days.filter(Boolean);
-    const dials = present.reduce((t, r) => t + r.dials, 0);
-    const talk = present.reduce((t, r) => t + r.talk_seconds, 0);
-    const contacts = present.reduce((t, r) => t + (r.contacts || 0), 0);
     return {
-      setter, days, dials, talk, contacts, booked: booked.get(setter) || 0,
-      active: present.filter(r => r.dials > 0).length,
-      trend: dates30.map(d => { const r = byKey.get(`${setter}|${d}`); return r ? M.of(r) : null; })
+      setter, days, booked: booked.get(setter) || 0,
+      dials: sum(present, 'dials'), talk: sum(present, 'talk_seconds'), contacts: sum(present, 'contacts'),
+      active: present.filter(r => r.dials > 0).length
     };
   })
     // Departed people show (as one row) only in a window where they did something.
     .filter(r => r.setter !== DEPARTED_KEY || r.dials > 0 || r.booked > 0)
-    .sort((a, b) => windowValue(b) - windowValue(a) || ix.label(a.setter).localeCompare(ix.label(b.setter)));
+    .sort((a, b) => b.dials - a.dials || b.booked - a.booked || ix.label(a.setter).localeCompare(ix.label(b.setter)));
 
-  // Rostered or appearing in the data, but never stored by the dialer: every cell hatched.
+  // Rostered or in the appointment data, but never stored by the dialer: listed with their
+  // bookings and no dial numbers at all, so nobody reads them as 0 dials.
   const noCoverage = p.roster
     .filter(r => r.status !== 'alias' && !covered.has(r.setter) &&
       (r.setter === DEPARTED_KEY ? booked.get(DEPARTED_KEY) : r.active || r.in_appt_data))
     .map(r => ({ setter: r.setter, booked: booked.get(r.setter) || 0 }))
     .sort((a, b) => b.booked - a.booked || ix.label(a.setter).localeCompare(ix.label(b.setter)));
 
-  // Colour scale: 0 to the 95th percentile of this window's cells, so one huge day
-  // can't wash the grid out. Values above it share the darkest step.
-  const cellValues = withCoverage.flatMap(r => r.days.filter(Boolean).map(M.of)).filter(v => v != null);
-  const top = percentile(cellValues, 0.95) || 1;
-  const step = stepper(top);
-
-  const team = dates.map(d => {
-    const rows = p.dials.filter(r => r.date === d);
-    if (!rows.length) return null;
-    const dials = rows.reduce((t, r) => t + r.dials, 0);
-    const talk = rows.reduce((t, r) => t + r.talk_seconds, 0);
-    const contacts = rows.reduce((t, r) => t + (r.contacts || 0), 0);
-    return M.of({ dials, talk_seconds: talk, contacts });
-  });
-  const teamTotals = withCoverage.reduce((t, r) => ({ dials: t.dials + r.dials, talk: t.talk + r.talk, contacts: t.contacts + r.contacts, active: t.active + r.active, booked: t.booked + r.booked }),
+  const team = people.reduce((t, r) => ({ dials: t.dials + r.dials, talk: t.talk + r.talk, contacts: t.contacts + r.contacts, active: t.active + r.active, booked: t.booked + r.booked }),
     { dials: 0, talk: 0, contacts: 0, active: 0, booked: 0 });
-
-  const controls = h('div', { class: 'controls' },
-    segmented('Window', WINDOWS, view.window, v => { view.window = v; draw(); }),
-    view.window === 'custom' ? customRange(view, win, p.today_ct, draw) : null,
-    h('span', { class: 'controls-gap' }),
-    segmented('Cell shows', metrics.map(([k, m]) => [k, m.label]), view.metric, v => { view.metric = v; draw(); }));
+  const allBooked = sum(p.booked.filter(r => inWin(r.date_booked)), 'booked');
 
   const notes = [];
   if (p.coverage.dials_from && win.from < p.coverage.dials_from) notes.push(`The dialer feed starts ${dayLabel(p.coverage.dials_from)}, ${p.coverage.dials_from.slice(0, 4)}; earlier days are hatched "no data", not zeros.`);
@@ -107,87 +85,101 @@ function content(p, ix, draw) {
 
   return [
     controls,
-    h('section', { class: 'card heat-card', 'aria-labelledby': 'heat-title' },
-      h('div', { class: 'card-head' },
-        h('h2', { id: 'heat-title' }, `${M.label} per setter per day`),
-        h('p', { class: 'sub' }, `${dayLabel(win.from)} – ${dayLabel(win.to)} · ${win.days} days · by dialer date · booked by Date Booked`),
-        h('p', { class: 'sub' }, `Everyone on the dialer: ${fmtInt(teamTotals.dials)} dials on ${fmtInt(teamTotals.active)} active setter-days ` +
-          `(${teamTotals.active ? fmtInt(teamTotals.dials / teamTotals.active) : '—'} per active day)` +
-          (contactsOk ? ` · ${fmtInt(teamTotals.contacts)} contacts (${teamTotals.dials ? fmtPct1(teamTotals.contacts / teamTotals.dials) : '—'} of dials)` +
-            ` · ${fmtInt(teamTotals.booked)} booked, ${contactToBooking(teamTotals.booked, teamTotals.contacts)} contact to booking` : '') +
-          ` · ${fmtDuration(teamTotals.talk)} talk` +
-          (teamTotals.dials ? ` · ${Math.round(teamTotals.talk / teamTotals.dials)}s per dial` : '')),
-        notes.map(n => h('p', { class: 'sub faint' }, n))),
-      h('div', { class: 'heat-scroll' },
-        heatTable(dates, p.today_ct, withCoverage, noCoverage, team, M, step, ix, contactsOk)),
-      legend(M.cell(top))),
-    h('p', { class: 'sub faint' }, defLink('active-day', 'Active day'),
-      ' = a day with dials > 0; per-day averages divide by active days, not calendar days. The dialer stores a row for every rostered setter every day, ' +
-      "including days before they started, so a 0 doesn't prove anyone was working.",
-      contactsOk ? [' ', defLink('contacts-60', 'Contacts'), ' = dialer calls over 60 seconds (voicemails that long included); contact rate = contacts ÷ dials; ',
-        defLink('contact-to-booking', 'contact to booking'), ' = booked ÷ contacts.'] : null),
+    notes.length ? h('div', { class: 'banner banner-warn' }, notes.join(' ')) : null,
+    h('div', { class: 'tiles tiles-4' },
+      tile(defLink('dials', 'Dials'), fmtInt(team.dials), `${team.active ? fmtInt(team.dials / team.active) : '—'} per setter per active day`, true),
+      tile(defLink('contacts-60', 'Contacts'), contactsOk ? fmtInt(team.contacts) : '—', `calls over 60s · ${contactRate(team.contacts, team.dials)} of dials`, contactsOk, 'not in the dialer feed'),
+      tile(defLink('booked', 'Booked'), p.sources.tracker.ok ? fmtInt(allBooked) : '—',
+        contactsOk ? `${contactToBooking(team.booked, team.contacts)} contact to booking` : 'by Date Booked', p.sources.tracker.ok),
+      tile(defLink('talk', 'Talk time'), fmtDuration(team.talk), team.dials ? `${Math.round(team.talk / team.dials)}s per dial` : '—', true)),
+    setterBoard(people, noCoverage, ix, contactsOk, p.sources.tracker.ok),
+    dayGrid(p, ix, dates, people, byKey, contactsOk, draw),
     leadsCard(p, ix, win)
   ];
-
-  function windowValue(r) {
-    if (view.metric === 'dials') return r.dials;
-    if (view.metric === 'contacts') return r.contacts;
-    if (view.metric === 'talk') return r.talk;
-    if (view.metric === 'rate') return r.dials ? r.contacts / r.dials : -1;
-    return r.dials ? r.talk / r.dials : -1;
-  }
 }
 
-function heatTable(dates, today, rows, noCoverage, team, M, step, ix, contactsOk) {
-  const extra = contactsOk ? 1 : 0;
-  const teamTop = Math.max(...team.filter(v => v != null), 1);
-  const head = h('tr', null,
-    h('th', { scope: 'col', class: 'who sticky' }, 'Setter'),
-    dayHeads(dates, today),
-    h('th', { scope: 'col', class: 'num' }, M.ratio ? 'Window' : 'Total'),
-    h('th', { scope: 'col', class: 'num' }, 'Active days'),
-    h('th', { scope: 'col', class: 'num' }, 'Per active day'),
-    h('th', { scope: 'col', class: 'num' }, 'Booked'),
-    contactsOk ? h('th', { scope: 'col', class: 'num', title: 'Booked ÷ contacts (calls over 60s)' }, 'Contact → booking') : null,
-    h('th', { scope: 'col', class: 'trend' }, '30-day trend'));
+// ---------------------------------------------------------------- by setter, the whole window
 
-  const body = rows.map(r => h('tr', null,
-    h('th', { scope: 'row', class: 'who sticky' }, ix.label(r.setter), tag(ix.status(r.setter))),
-    r.days.map((row, i) => cell(row, dates[i], today, M, step, ix.label(r.setter))),
-    h('td', { class: 'num strong' }, windowCell(r, M)),
-    h('td', { class: 'num' }, fmtInt(r.active)),
-    h('td', { class: 'num' }, perActiveDay(r)),
-    h('td', { class: 'num' }, fmtInt(r.booked)),
-    contactsOk ? h('td', { class: 'num', title: `${ix.label(r.setter)}: ${fmtInt(r.booked)} booked ÷ ${fmtInt(r.contacts)} contacts` }, contactToBooking(r.booked, r.contacts)) : null,
-    h('td', { class: 'trend' }, sparkline(r.trend, M))));
+function setterBoard(rows, noCoverage, ix, contactsOk, apptsOk) {
+  const max = Math.max(...rows.map(r => r.dials), 1);
+  const head = (label, cls = 'num', title) => h('th', { scope: 'col', class: cls, title }, label);
+  return h('section', { class: 'card floor-table-card', 'aria-labelledby': 'board-title' },
+    h('div', { class: 'card-head' },
+      h('h2', { id: 'board-title' }, 'By setter'),
+      h('p', { class: 'sub' }, 'Highest dials first. Per day counts only days they dialed.')),
+    h('table', { class: 'floor-table board-table' },
+      h('thead', null, h('tr', null,
+        head('Setter', ''),
+        head('Dials'),
+        head(h('span', { class: 'sr-only' }, 'Dials bar'), 'bar-col'),
+        head('Per day', 'num', 'Dials per active dialing day'),
+        contactsOk ? head('Contacts') : null,
+        head('Booked'),
+        contactsOk ? head('Contact → booking', 'num', 'Booked ÷ contacts') : null,
+        head('Talk'))),
+      h('tbody', null,
+        rows.map(r => {
+          const fill = h('div', { class: 'bar-fill' });
+          fill.style.width = `${((100 * r.dials) / max).toFixed(2)}%`;
+          const who = ix.label(r.setter);
+          return h('tr', { class: 'floor-row' + (ix.status(r.setter) === 'unresolved' ? ' is-flagged' : '') },
+            h('th', { scope: 'row', class: 'who' }, who, tag(ix.status(r.setter))),
+            h('td', { class: 'num dials' }, fmtInt(r.dials)),
+            h('td', { class: 'bar-col' }, h('div', { class: 'bar', role: 'img', 'aria-label': `${r.dials} dials` }, fill)),
+            h('td', { class: 'num perday', title: `${fmtInt(r.dials)} dials over ${r.active} active days` }, r.active ? fmtInt(r.dials / r.active) : '—'),
+            contactsOk ? h('td', { class: 'num contacts' }, fmtInt(r.contacts), r.dials ? [' ', h('span', { class: 'rate' }, contactRate(r.contacts, r.dials))] : null) : null,
+            h('td', { class: 'num booked' }, apptsOk ? fmtInt(r.booked) : '—'),
+            contactsOk ? h('td', { class: 'num c2b', title: `${who}: ${fmtInt(r.booked)} booked ÷ ${fmtInt(r.contacts)} contacts` }, contactToBooking(r.booked, r.contacts)) : null,
+            h('td', { class: 'num talk' }, fmtDuration(r.talk)));
+        }),
+        noCoverage.length ? h('tr', { class: 'board-uncovered' },
+          h('td', { colspan: contactsOk ? 8 : 6 },
+            defLink('no-coverage', `No dialer data (${noCoverage.length})`), ': ',
+            noCoverage.map((r, i) => [i ? ', ' : '', ix.label(r.setter), r.booked ? ` (${fmtInt(r.booked)} booked)` : '']))) : null)),
+    h('p', { class: 'sub faint' },
+      defLink('contacts-60', 'Contacts'), ' = calls over 60 seconds, with their share of dials. ',
+      defLink('contact-to-booking', 'Contact → booking'), ' = booked ÷ contacts.'));
+}
 
-  const uncovered = noCoverage.length ? [
-    h('tr', { class: 'heat-divider' }, h('th', { scope: 'rowgroup', colspan: dates.length + 6 + extra }, h('span', { class: 'sticky-label' },
-      `No dial coverage (${noCoverage.length}): the dialer stores no rows for these names, so every day is "no data", not 0`))),
-    ...noCoverage.map(r => h('tr', { class: 'is-uncovered' },
-      h('th', { scope: 'row', class: 'who sticky' }, ix.label(r.setter), tag(ix.status(r.setter))),
-      dates.map(d => noDataCell(d, ix.label(r.setter))),
-      h('td', { class: 'faint uncovered-note', colspan: 3 }, 'no dial coverage'),
-      h('td', { class: 'num' }, fmtInt(r.booked)),
-      contactsOk ? h('td', { class: 'num faint' }, '—') : null,
-      h('td', { class: 'trend' })))
-  ] : [];
+// ---------------------------------------------------------------- day by day
 
-  const foot = h('tr', { class: 'team-row' },
-    h('th', { scope: 'row', class: 'who sticky' }, 'Team', h('span', { class: 'faint team-sub' }, 'everyone on the dialer')),
-    team.map((v, i) => {
-      if (v == null) return h('td', { class: 'col-cell', title: `${dayLabel(dates[i])}: no data` }, h('span', { class: 'sr-only' }, 'no data'));
-      const bar = h('div', { class: 'col-bar' });
-      bar.style.height = `${Math.max(2, (34 * v) / teamTop).toFixed(1)}px`;
-      return h('td', { class: 'col-cell', title: `${dayLabel(dates[i])}: ${M.long(v)}` },
-        h('span', { class: 'col-val' }, compact(v, M)), h('div', { class: 'col-track' }, bar));
-    }),
-    h('td', { colspan: 5 + extra }));
+function dayGrid(p, ix, dates, rows, byKey, contactsOk, draw) {
+  const metrics = Object.entries(METRICS).filter(([, m]) => contactsOk || !m.needsContacts);
+  if (!metrics.some(([k]) => k === view.metric)) view.metric = 'dials';
+  const M = METRICS[view.metric];
+  const today = p.today_ct;
+  // Colour scale: 0 to the 95th percentile of this window's cells, so one huge day
+  // can't wash the grid out. Values above it share the darkest step.
+  const top = percentile(rows.flatMap(r => r.days.filter(Boolean).map(M.of)).filter(v => v != null), 0.95) || 1;
+  const step = stepper(top);
+  const team = dates.map(d => {
+    const day = p.dials.filter(r => r.date === d);
+    return day.length ? M.of({ dials: sum(day, 'dials'), talk_seconds: sum(day, 'talk_seconds'), contacts: sum(day, 'contacts') }) : null;
+  });
+  const teamWindow = rows.reduce((t, r) => ({ dials: t.dials + r.dials, talk: t.talk + r.talk, contacts: t.contacts + r.contacts }), { dials: 0, talk: 0, contacts: 0 });
 
-  return h('table', { class: 'heat' },
-    h('thead', null, head),
-    h('tbody', null, body, uncovered),
-    h('tfoot', null, foot));
+  return h('section', { class: 'card heat-card', 'aria-labelledby': 'heat-title' },
+    h('div', { class: 'card-head card-head-row' },
+      h('div', null,
+        h('h2', { id: 'heat-title' }, 'Day by day'),
+        h('p', { class: 'sub' }, `${M.label} per setter per day · by dialer date`)),
+      segmented('Show', metrics.map(([k, m]) => [k, m.label]), view.metric, v => { view.metric = v; draw(); })),
+    h('div', { class: 'heat-scroll' },
+      h('table', { class: 'heat' },
+        h('thead', null, h('tr', null,
+          h('th', { scope: 'col', class: 'who sticky' }, 'Setter'),
+          dayHeads(dates, today),
+          h('th', { scope: 'col', class: 'num' }, M.ratio ? 'Window' : 'Total'))),
+        h('tbody', null, rows.map(r => h('tr', null,
+          h('th', { scope: 'row', class: 'who sticky' }, ix.label(r.setter), tag(ix.status(r.setter))),
+          r.days.map((row, i) => cell(row, dates[i], today, M, step, ix.label(r.setter))),
+          h('td', { class: 'num strong' }, windowCell(r, M))))),
+        h('tfoot', null, h('tr', { class: 'team-row' },
+          h('th', { scope: 'row', class: 'who sticky' }, 'Team'),
+          team.map((v, i) => h('td', { class: 'team-cell' + (dates[i] === today ? ' is-today' : ''), title: `${dayLabel(dates[i])}: ${v == null ? 'no data' : M.long(v)}` },
+            v == null ? h('span', { class: 'sr-only' }, 'no data') : M.cell(v))),
+          h('td', { class: 'num strong' }, windowCell(teamWindow, M)))))),
+    legend(M.cell(top)));
 }
 
 function dayHeads(dates, today) {
@@ -195,7 +187,7 @@ function dayHeads(dates, today) {
     const day = Number(d.slice(8));
     const monthMark = i === 0 || day === 1 ? dayLabel(d).split(', ')[1].split(' ')[0] : '';
     return h('th', { scope: 'col', class: 'day' + (d === today ? ' is-today' : ''), title: dayLabel(d) + (d === today ? ' (today, so far)' : '') },
-      h('span', { class: 'month' }, monthMark || ' '),
+      h('span', { class: 'month' }, monthMark || ' '),
       h('span', { class: 'dow' }, dayLabel(d).slice(0, 1)),
       h('span', { class: 'dom' }, String(day)));
   });
@@ -218,6 +210,7 @@ function noDataCell(date, who) {
   return h('td', { class: 'hc nodata', title: `${who} · ${dayLabel(date)}: no data` }, h('span', { class: 'sr-only' }, 'no data'));
 }
 
+/** The window's value for a row of totals {dials, talk, contacts}, in the grid's metric. */
 function windowCell(r, M) {
   if (view.metric === 'dials') return fmtInt(r.dials);
   if (view.metric === 'contacts') return fmtInt(r.contacts);
@@ -226,39 +219,12 @@ function windowCell(r, M) {
   return M.cell(view.metric === 'rate' ? r.contacts / r.dials : r.talk / r.dials);
 }
 
-function perActiveDay(r) {
-  if (!r.active || METRICS[view.metric].ratio) return '—';
-  if (view.metric === 'talk') return fmtDuration(r.talk / r.active);
-  return fmtInt((view.metric === 'contacts' ? r.contacts : r.dials) / r.active);
-}
-
-/** 30 days, the row's own scale; gaps where the dialer has no row. The latest day is the accent dot. */
-function sparkline(values, M) {
-  const W = 96, H = 24, pad = 3;
-  const max = Math.max(...values.filter(v => v != null), 1);
-  const x = i => pad + (i * (W - 2 * pad)) / (values.length - 1);
-  const y = v => H - pad - (v / max) * (H - 2 * pad);
-  const runs = [];
-  let run = [];
-  values.forEach((v, i) => {
-    if (v == null) { if (run.length) runs.push(run); run = []; } else run.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`);
-  });
-  if (run.length) runs.push(run);
-  const lastIdx = values.length - 1;
-  const last = values[lastIdx];
-  const known = values.filter(v => v != null);
-  return s('svg', { class: 'spark', width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img',
-    'aria-label': known.length ? `Last 30 days, ${known.length} with data; latest ${last == null ? 'no data' : M.long(last)}` : 'No data in the last 30 days' },
-  runs.map(pts => (pts.length > 1 ? s('polyline', { points: pts.join(' '), class: 'spark-line' }) : s('circle', { cx: pts[0].split(',')[0], cy: pts[0].split(',')[1], r: 1.5, class: 'spark-pt' }))),
-  last != null ? s('circle', { cx: x(lastIdx).toFixed(1), cy: y(last).toFixed(1), r: 2.5, class: 'spark-now' }) : null);
-}
-
 function legend(topText, noData = defLink('no-coverage', 'no data')) {
   return h('div', { class: 'heat-legend', 'aria-label': 'Colour key' },
-    h('span', { class: 'faint' }, 'Key'),
     h('span', { class: 'hc s0 key' }, '0'),
     [1, 2, 3, 4, 5].map(i => h('span', { class: `hc s${i} key` })),
-    h('span', { class: 'faint' }, `${topText}+ (95th percentile of this window)`),
+    h('span', { class: 'faint' }, `${topText}+`),
+    h('span', { class: 'heat-legend-gap' }),
     h('span', { class: 'hc nodata key' }),
     h('span', { class: 'faint' }, noData));
 }
@@ -313,16 +279,10 @@ function leadsCard(p, ix, win) {
       : h('td', { class: `hc s${step(v)}${dates[i] === today ? ' is-today' : ''}`, title: `${label} · ${dayLabel(dates[i])}: ${leads(v)}${dates[i] === today ? ' so far' : ''}` }, fmtInt(v)))),
     h('td', { class: 'num strong' }, fmtInt(r.total)),
     h('td', { class: 'num' }, share(r.total)));
-  const teamTop = Math.max(...team.filter(v => v != null), 1);
   const foot = h('tr', { class: 'team-row' },
-    h('th', { scope: 'row', class: 'who sticky' }, 'All leads', h('span', { class: 'faint team-sub' }, 'setters and queues')),
-    team.map((v, i) => {
-      if (v == null) return h('td', { class: 'col-cell', title: `${dayLabel(dates[i])}: no data` }, h('span', { class: 'sr-only' }, 'no data'));
-      const bar = h('div', { class: 'col-bar' });
-      bar.style.height = `${Math.max(2, (34 * v) / teamTop).toFixed(1)}px`;
-      return h('td', { class: 'col-cell', title: `${dayLabel(dates[i])}: ${leads(v)}${dates[i] === today ? ' so far' : ''}` },
-        h('span', { class: 'col-val' }, String(v)), h('div', { class: 'col-track' }, bar));
-    }),
+    h('th', { scope: 'row', class: 'who sticky' }, 'All leads'),
+    team.map((v, i) => h('td', { class: 'team-cell' + (dates[i] === today ? ' is-today' : ''), title: `${dayLabel(dates[i])}: ${v == null ? 'no data' : leads(v) + (dates[i] === today ? ' so far' : '')}` },
+      v == null ? h('span', { class: 'sr-only' }, 'no data') : fmtInt(v))),
     h('td', { class: 'num strong' }, fmtInt(all)),
     h('td'));
 
@@ -333,8 +293,7 @@ function leadsCard(p, ix, win) {
   return h('section', { class: 'card heat-card', 'aria-labelledby': 'leads-title' },
     h('div', { class: 'card-head' },
       title,
-      h('p', { class: 'sub' }, `${dayLabel(win.from)} – ${dayLabel(win.to)} · ${win.days} days · by the lead's date · same window as the dials grid`),
-      h('p', { class: 'sub' }, [`${leads(all)} in the window: ${fmtInt(toSetters)} to setters`, ...queues.map(q => `${fmtInt(q.total)} in ${q.name}`)].join(' · ')),
+      h('p', { class: 'sub' }, [`${leads(all)} by the lead's date: ${fmtInt(toSetters)} to setters`, ...queues.map(q => `${fmtInt(q.total)} in ${q.name}`)].join(' · ')),
       notes.map(n => h('p', { class: 'sub faint' }, n))),
     h('div', { class: 'heat-scroll' },
       h('table', { class: 'heat' },
@@ -346,24 +305,16 @@ function leadsCard(p, ix, win) {
         h('tbody', null,
           setters.map(r => line(r, ix.label(r.name), tag(ix.status(r.name)))),
           queues.length ? [
-            h('tr', { class: 'heat-divider' }, h('th', { scope: 'rowgroup', colspan: dates.length + 3 }, h('span', { class: 'sticky-label' }, 'Queues: leads not assigned to a setter'))),
+            h('tr', { class: 'heat-divider' }, h('th', { scope: 'rowgroup', colspan: dates.length + 3 }, h('span', { class: 'sticky-label' }, 'Not assigned to a setter'))),
             ...queues.map(r => line(r, r.name, h('span', { class: 'tag' }, 'queue'), 'is-queue'))
           ] : []),
         h('tfoot', null, foot))),
     none.length ? h('p', { class: 'sub' }, `No new leads in this window (${none.length}): ${none.join(', ')}`) : null,
     legend(fmtInt(top), 'before the routing sheet starts'),
-    h('p', { class: 'sub faint' }, "Credited to the setter the router assigned (its Setter column), by rotation or by hand; that never changes when someone else picks the lead up. " +
-      'Share = their leads ÷ every new lead in the window, queues included.'));
+    h('p', { class: 'sub faint' }, 'Credited to the setter the router assigned, even if someone else picked the lead up. Share = their leads ÷ all new leads.'));
 }
 
 function shortDuration(seconds) {
   const mins = Math.round(seconds / 60);
   return mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')}`;
-}
-
-function compact(v, M) {
-  if (M === METRICS.talk) return `${Math.round(v / 3600)}h`;
-  if (M === METRICS.spd) return `${Math.round(v)}s`;
-  if (M === METRICS.rate) return `${Math.round(100 * v)}%`;
-  return v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}K` : String(Math.round(v));
 }

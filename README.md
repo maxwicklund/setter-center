@@ -62,7 +62,7 @@ GitHub Pages can't put a login in front of a public site. Cloudflare Pages + Clo
 
 ## Things worth checking by eye
 
-1. Floor (bottom strip), Dials & Activity, Goals (unranked lists) and Data Health (roster): the two names on neither list each appear as their own flagged row.
+1. Floor (bottom line), Dials & Activity, Goals (unranked lists) and Data Health (roster): the two names on neither list each appear as their own flagged row.
 2. Dials & Activity → Custom → start before 14 Jul 2026: hatched "no data" cells look different from pale "0" cells.
 3. Appointments: setters under 10 resolved appointments appear as greyed fractions ("3/5"), unranked.
 4. Appointments: Pending (hatched) and Canceled (grey) bars sit apart from the Showed / No Show stack.
