@@ -70,9 +70,9 @@ function tiles(p, buckets, ages) {
   const never = sumLeads(buckets, ['never']);
   const over24 = ages.filter(a => a.age === '1to3d' || a.age === 'gt3d').reduce((t, a) => t + a.leads, 0);
   const fast = sumLeads(buckets, ['le5m', 'le15m', 'le1h']);
-  const tile = (label, value, sub) => h('section', { class: 'tile card' }, h('p', { class: 'label' }, label), h('p', { class: 'tile-value' }, value), h('p', { class: 'sub' }, sub));
+  const tile = (label, value, sub, kind) => h('section', { class: 'tile card' + (kind ? ` kind-${kind}` : '') }, h('p', { class: 'label' }, label), h('p', { class: 'tile-value' }, value), h('p', { class: 'sub' }, sub));
   return h('div', { class: 'tiles tiles-4' },
-    tile('Leads in', fmtInt(leads), 'every lead the routing sheet logged'),
+    tile('Leads in', fmtInt(leads), 'every lead the routing sheet logged', 'count'),
     tile(defLink('worked', 'Never worked'), fmtInt(never), `${pct(never, leads)} of leads · ${fmtInt(over24)} of them waiting over 24 hours`),
     tile('Worked within 1 hour', fmtInt(fast), `${pct(fast, leads)} of leads`),
     tile(defLink('min-touch', 'Median to first touch'), mins(p.speed_window_median_min), 'over touched leads, all lead types · the mean is never used'));

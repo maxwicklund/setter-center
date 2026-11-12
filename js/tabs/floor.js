@@ -63,8 +63,8 @@ export function renderFloor(p, ix) {
     h('div', { class: 'tiles tiles-4' },
       dialsTile(dialsOk, dialerReported, teamDials, offRosterDials, dialRows, p),
       tile(defLink('contacts-60', 'Contacts today'), contactsOk && dialerReported ? fmtInt(contacts) : '—',
-        `calls over 60s · ${contactRate(contacts, teamDials)} of dials`, contactsOk, dialsOk ? 'not in the dialer feed' : 'source unavailable'),
-      tile(defLink('booked', 'Booked today'), apptsOk ? fmtInt(bookedTotal) : '—', 'entered on the tracker so far', apptsOk),
+        `calls over 60s · ${contactRate(contacts, teamDials)} of dials`, contactsOk, { off: dialsOk ? 'not in the dialer feed' : 'source unavailable', kind: 'count' }),
+      tile(defLink('booked', 'Booked today'), apptsOk ? fmtInt(bookedTotal) : '—', 'entered on the tracker so far', apptsOk, { kind: 'count' }),
       costTile(p)),
     h('section', { class: 'card stat-strip', 'aria-label': 'More for today' },
       stat(defLink('new-leads', 'New leads'), leadsOk ? fmtInt(teamLeads) : '—',
@@ -81,8 +81,8 @@ function dialsTile(ok, reported, teamDials, offRosterDials, dialRows, p) {
   const note = !ok ? "Sheet A couldn't be read, so there are no dial counts right now."
     : !reported ? `The dialer has no rows for today yet. Latest day it reported: ${p.coverage.dials_to || '—'}.`
       : offRosterDials ? `${fmtInt(offRosterDials)} of them from names not on the roster` : 'updates every 5 minutes';
-  return tile(defLink('dials', 'Dials today'), ok && reported ? fmtInt(teamDials) : '—', note, ok && reported, note,
-    hasTarget && ok && reported ? pace(p, dialRows) : null);
+  return tile(defLink('dials', 'Dials today'), ok && reported ? fmtInt(teamDials) : '—', note, ok && reported,
+    { off: note, kind: 'accent', extra: hasTarget && ok && reported ? pace(p, dialRows) : null });
 }
 
 /** Team pace: live (non-onboarding) setters' dials against DIAL_TARGET x those setters. */

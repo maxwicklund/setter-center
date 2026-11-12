@@ -75,6 +75,10 @@ function dialStats(p, who, from, to) {
 
 const bookedIn = (p, who, from, to) => p.booked.filter(r => r.setter === who && r.date_booked >= from && r.date_booked <= to).reduce((t, r) => t + r.booked, 0);
 
+/** New leads the router assigned (one setter, or every setter when who is null) and how many of them booked. */
+const leadsIn = (p, who, from, to) => p.speed_daily.filter(r => (who == null || r.setter === who) && r.date >= from && r.date <= to)
+  .reduce((t, r) => ({ leads: t.leads + r.leads, booked: t.booked + r.booked }), { leads: 0, booked: 0 });
+
 function activity(p, me, win, prior, team) {
   if (!p.sources.kpi.ok) return h('section', { class: 'card' }, h('p', { class: 'faint' }, "Sheet A couldn't be read, so there are no dial counts right now."));
   if (!me.on_dials_roster) {
@@ -113,12 +117,21 @@ function activity(p, me, win, prior, team) {
         h('p', { class: 'tile-value' }, fmtDuration(now.talk)),
         delta(now.talk, before.rows ? before.talk : null, 'previous period', fmtDuration),
         h('p', { class: 'sub' }, `${now.active ? fmtDuration(now.talk / now.active) : '—'} per active day`))),
-    h('div', { class: 'figures' + (hasContacts(p) ? ' figures-3' : '') },
+    h('div', { class: 'figures' },
+      leadFigure(p, me.setter, win),
       hasContacts(p) ? figure(defLink('contact-to-booking', 'Contact to booking'), contactToBooking(booked, now.contacts),
         now.contacts ? `${fmtInt(booked)} booked ÷ ${fmtInt(now.contacts)} contacts · team median ${teamC2B == null ? '—' : fmtPct1(teamC2B)}` : 'no contacts in this window') : null,
       figure('Dials per booking', booked ? fmtInt(now.dials / booked) : '—', booked ? `${fmtInt(now.dials)} dials ÷ ${fmtInt(booked)} booked (Date Booked)` : 'nothing booked in this window'),
       figure('Seconds per dial', now.dials ? `${Math.round(now.talk / now.dials)}s` : '—', `Team median ${teamSpd == null ? '—' : Math.round(teamSpd) + 's'}`)),
     h('p', { class: 'sub faint' }, 'By dialer date. Active day = a day with dials > 0.'));
+}
+
+function leadFigure(p, who, win) {
+  if (!p.sources.router.ok) return null;
+  const mine = leadsIn(p, who, win.from, win.to);
+  const all = leadsIn(p, null, win.from, win.to);
+  return figure(defLink('lead-to-booking', 'New lead → booking'), mine.leads ? fmtPct1(mine.booked / mine.leads) : '—',
+    mine.leads ? `${fmtInt(mine.booked)} of ${fmtInt(mine.leads)} new leads booked · all setters ${all.leads ? fmtPct1(all.booked / all.leads) : '—'}` : 'no new leads routed to them in this window');
 }
 
 function figure(label, value, sub) {

@@ -1,6 +1,6 @@
 import { h } from '../dom.js';
 import { DEPARTED_KEY, WINDOWS, MAX_CUSTOM_DAYS, fmtInt, fmtDuration, bySetter, dayLabel, dateRange, resolveWindow, percentile, hasContacts, fmtPct1, contactRate, contactToBooking, sum } from '../data.js';
-import { tag, segmented, customRange, defLink, tile } from '../ui.js';
+import { tag, segmented, customRange, defLink, tile, rateBar } from '../ui.js';
 
 // Tab 2, Dials & Activity, read top to bottom: the window's totals, one row per setter for
 // the window, then the same people day by day. The day grid is one sequential ramp anchored
@@ -18,6 +18,8 @@ const METRICS = {
     none: 'no seconds per dial', ratio: true }
 };
 const STEPS = 5;
+const RATE_MIN_LEADS = 20; // fewer new leads than this in the window: the lead → booking rate is faded, not ranked
+const RATE_BAR = 0.5;      // lead → booking bars share one 0–50% scale
 
 // Kept across polls and tab switches so a refresh never resets what someone picked.
 const view = { window: '14d', metric: 'dials', from: null, to: null };
@@ -41,10 +43,11 @@ function content(p, ix, draw) {
     segmented('Window', WINDOWS, view.window, v => { view.window = v; draw(); }),
     view.window === 'custom' ? customRange(view, win, p.today_ct, draw) : null,
     h('span', { class: 'controls-gap' }),
-    h('span', { class: 'sub' }, `${dayLabel(win.from)} – ${dayLabel(win.to)} · ${win.days} days`));
+    h('span', { class: 'win-range' }, `${dayLabel(win.from)} – ${dayLabel(win.to)}`, h('span', { class: 'win-days' }, ` · ${win.days} days`)));
   if (!p.sources.kpi.ok) {
     return [controls,
       h('div', { class: 'banner banner-warn' }, "Sheet A couldn't be read, so there are no dial counts right now. They come back on the next successful refresh."),
+      leadBookCard(p, ix, win),
       leadsCard(p, ix, win)];
   }
   const contactsOk = hasContacts(p);
@@ -87,15 +90,89 @@ function content(p, ix, draw) {
     controls,
     notes.length ? h('div', { class: 'banner banner-warn' }, notes.join(' ')) : null,
     h('div', { class: 'tiles tiles-4' },
-      tile(defLink('dials', 'Dials'), fmtInt(team.dials), `${team.active ? fmtInt(team.dials / team.active) : '—'} per setter per active day`, true),
-      tile(defLink('contacts-60', 'Contacts'), contactsOk ? fmtInt(team.contacts) : '—', `calls over 60s · ${contactRate(team.contacts, team.dials)} of dials`, contactsOk, 'not in the dialer feed'),
+      tile(defLink('dials', 'Dials'), fmtInt(team.dials), `${team.active ? fmtInt(team.dials / team.active) : '—'} per setter per active day`, true, { kind: 'count' }),
+      tile(defLink('contacts-60', 'Contacts'), contactsOk ? fmtInt(team.contacts) : '—', `calls over 60s · ${contactRate(team.contacts, team.dials)} of dials`, contactsOk,
+        { off: 'not in the dialer feed', kind: 'count' }),
       tile(defLink('booked', 'Booked'), p.sources.tracker.ok ? fmtInt(allBooked) : '—',
-        contactsOk ? `${contactToBooking(team.booked, team.contacts)} contact to booking` : 'by Date Booked', p.sources.tracker.ok),
+        contactsOk ? `${contactToBooking(team.booked, team.contacts)} contact to booking` : 'by Date Booked', p.sources.tracker.ok, { kind: 'count' }),
       tile(defLink('talk', 'Talk time'), fmtDuration(team.talk), team.dials ? `${Math.round(team.talk / team.dials)}s per dial` : '—', true)),
     setterBoard(people, noCoverage, ix, contactsOk, p.sources.tracker.ok),
+    leadBookCard(p, ix, win),
     dayGrid(p, ix, dates, people, byKey, contactsOk, draw),
     leadsCard(p, ix, win)
   ];
+}
+
+// ---------------------------------------------------------------- new lead to booking
+
+/**
+ * Of the new leads the router assigned each setter in the window (by the lead's date), the
+ * share the routing sheet marks Booked. Credited to the assigned setter, like the lead grid
+ * below. The bar is on one fixed 0–50% scale so a column reads down at a glance.
+ */
+function leadBookCard(p, ix, win) {
+  const title = h('h2', { id: 'l2b-title' }, defLink('lead-to-booking', 'New lead → booking'));
+  if (!p.sources.router.ok) {
+    return h('section', { class: 'card' }, title,
+      h('p', { class: 'faint' }, "Sheet C (setter routing) couldn't be read, so there are no lead counts right now."));
+  }
+  const inWin = r => r.date >= win.from && r.date <= win.to;
+  const roll = (arr, key) => {
+    const m = new Map();
+    for (const r of arr) {
+      if (!inWin(r)) continue;
+      const t = m.get(r[key]) || { name: r[key], leads: 0, booked: 0 };
+      t.leads += r.leads;
+      t.booked += r.booked;
+      m.set(r[key], t);
+    }
+    return [...m.values()].filter(r => r.leads > 0);
+  };
+  const rate = r => r.booked / r.leads;
+  const rated = r => r.leads >= RATE_MIN_LEADS;
+  const setters = roll(p.speed_daily, 'setter')
+    .sort((a, b) => rated(b) - rated(a) || (rated(a) ? rate(b) - rate(a) : 0) || b.leads - a.leads || ix.label(a.name).localeCompare(ix.label(b.name)));
+  const queues = roll(p.speed_daily_queues, 'queue').sort((a, b) => b.leads - a.leads);
+  const add = rows => rows.reduce((t, r) => ({ leads: t.leads + r.leads, booked: t.booked + r.booked }), { leads: 0, booked: 0 });
+  const toSetters = add(setters);
+  const all = add(setters.concat(queues));
+  const start = p.coverage.daily_from;
+
+  const cells = r => [
+    h('td', { class: 'num' }, fmtInt(r.leads)),
+    h('td', { class: 'num' }, fmtInt(r.booked)),
+    h('td', { class: 'num rate-cell' }, rateBar(rate(r), fmtPct1(rate(r)), RATE_BAR))];
+  const row = (r, label, mark, cls = '') => h('tr', {
+    class: (cls + (rated(r) ? '' : ' is-small')).trim() || null,
+    title: `${label}: ${fmtInt(r.booked)} of ${fmtInt(r.leads)} new leads booked${rated(r) ? '' : ` (under ${RATE_MIN_LEADS} leads, so not ranked)`}`
+  }, h('th', { scope: 'row' }, label, mark), cells(r));
+
+  return h('section', { class: 'card', 'aria-labelledby': 'l2b-title' },
+    h('div', { class: 'card-head' },
+      title,
+      h('p', { class: 'sub' }, 'Of the new leads routed to each setter in this window, the share that booked. Highest rate first.')),
+    !start ? h('p', { class: 'faint' }, 'The routing sheet has no daily rows yet.')
+      : setters.length || queues.length ? h('div', { class: 'table-scroll' }, h('table', { class: 'data-table l2b-table' },
+        h('thead', null, h('tr', null,
+          h('th', { scope: 'col' }, 'Setter'),
+          h('th', { scope: 'col', class: 'num' }, 'New leads'),
+          h('th', { scope: 'col', class: 'num' }, 'Booked'),
+          h('th', { scope: 'col', class: 'num' }, 'Lead → booking'))),
+        h('tbody', null,
+          setters.map(r => row(r, ix.label(r.name), tag(ix.status(r.name)))),
+          queues.length ? [
+            h('tr', { class: 'group-row' }, h('th', { scope: 'rowgroup', colspan: 4 }, 'Not assigned to a setter')),
+            ...queues.map(r => row(r, r.name, h('span', { class: 'tag' }, 'queue'), 'is-queue'))
+          ] : []),
+        h('tfoot', null,
+          setters.length ? h('tr', null, h('th', { scope: 'row' }, 'All setters'), cells(toSetters)) : null,
+          queues.length ? h('tr', null, h('th', { scope: 'row' }, 'All new leads'), cells(all)) : null)))
+        : h('p', { class: 'faint' }, 'No new leads in this window.'),
+    start && win.from < start ? h('p', { class: 'sub faint' }, `The routing sheet starts ${dayLabel(start)}, ${start.slice(0, 4)}; earlier days have no lead data.`) : null,
+    h('p', { class: 'sub faint footnote' },
+      `Booked = the routing sheet marks the lead booked, credited to the setter it was assigned to. Leads from the last few days are still being worked, so recent windows read low. ` +
+      `Faded rows have under ${RATE_MIN_LEADS} new leads and aren't ranked. Lead type changes the rate a lot; `,
+      h('a', { href: '#speed' }, 'Speed to Lead'), ' compares setters on rotation leads only. Bars run 0–50%.'));
 }
 
 // ---------------------------------------------------------------- by setter, the whole window

@@ -14,7 +14,7 @@ export function costTile(p) {
   const week = ok ? costPerBooking(p, mondayOf(today), today) : null;
   const sub = !ok ? (p.sources.tracker.ok ? 'spend unavailable' : 'source unavailable')
     : `${day.spendDays ? '' : 'no spend row for today yet · '}this week so far: ${fmtMoney(week.rwCost)} RW · ${fmtMoney(week.totalCost)} total`;
-  return h('section', { class: 'tile card' + (ok ? '' : ' is-unavailable') },
+  return h('section', { class: 'tile card kind-money' + (ok ? '' : ' is-unavailable') },
     h('p', { class: 'label' }, defLink('cost-per-booking', 'Cost per booking today')),
     ok ? h('p', { class: 'tile-value tile-value-pair', title: titleOf(day, 'Today') },
       h('span', null, fmtMoney(day.rwCost), h('span', { class: 'unit' }, ' RW')),
